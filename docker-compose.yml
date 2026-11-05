@@ -1,0 +1,95 @@
+# Compose file for the home server.
+#
+# What runs:
+#   - `dashboard`     — always on, FastAPI on host port 8765
+#   - `cpgw_keeper`   — auto profile; SRP login + /tickle keepalive
+#   - `portfolio`     — auto profile; multi-sleeve runner, depends on the keeper
+#   - `sentiment`     — auto profile; news/sentiment poller
+#
+# Usage:
+#   docker compose up -d                       # dashboard only
+#   docker compose --profile auto up -d        # dashboard + keeper + portfolio + sentiment
+#
+# Phase 7+: CPGW (Client Portal Gateway) runs on the HOST as a separate service —
+# it's IBKR's Java daemon listening on port 5000. `network_mode: host` lets the
+# containers reach https://localhost:5000 directly.
+#
+# Required in .env:
+#   IBKR_USERNAME, IBKR_PASSWORD   — used by cpgw_keeper for SRP login
+#   PAPER=true                     — assert_paper_mode refuses anything else
+#   IB_PORT=5000                   — CPGW only ever uses 5000
+
+x-bot-common: &bot-common
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: tradingbot:local
+  restart: unless-stopped
+  network_mode: host
+  env_file:
+    - .env
+  volumes:
+    - ./logs:/app/logs
+    - ./models/artifacts:/app/models/artifacts
+    - ./config:/app/config:ro
+    - ./.env:/app/.env:ro
+
+services:
+  dashboard:
+    <<: *bot-common
+    container_name: tradingbot-dashboard
+    command:
+      - uvicorn
+      - dashboard.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8765/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  cpgw_keeper:
+    <<: *bot-common
+    container_name: tradingbot-cpgw-keeper
+    profiles: ["auto"]
+    command:
+      - python
+      - -m
+      - live.cpgw_keeper
+    # Needs IBKR_USERNAME / IBKR_PASSWORD in .env. Logs into CPGW (port 5000)
+    # via SRP-6a and refreshes the session every 60s.
+    depends_on:
+      dashboard:
+        condition: service_healthy
+
+  portfolio:
+    <<: *bot-common
+    container_name: tradingbot-portfolio
+    profiles: ["auto"]
+    command:
+      - python
+      - -m
+      - live.portfolio_runner
+      # Default to dry-run; flip to "--live" when you're ready and `docker compose up -d`
+    depends_on:
+      dashboard:
+        condition: service_healthy
+      cpgw_keeper:
+        condition: service_started
+
+  sentiment:
+    <<: *bot-common
+    container_name: tradingbot-sentiment
+    profiles: ["auto"]
+    command:
+      - python
+      - -m
+      - live.sentiment_worker
+    # Needs ALPHA_VANTAGE_API_KEY in .env unless config/symbols.yaml uses stub.
+    depends_on:
+      dashboard:
+        condition: service_healthy

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Sleeves · Trading Bot{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-xl font-semibold">Sleeves</h1>
+  <p class="text-xs text-slate-500">
+    Total equity ${{ "%.0f"|format(total_equity) }} — split into two independent budgets.
+  </p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+  <!-- Long-term sleeve -->
+  <section class="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-emerald-300">Long-term — All-Weather</h2>
+      <span class="text-emerald-400 font-semibold">${{ "%.0f"|format(lt_equity) }} ({{ "%.0f"|format(lt_cfg.allocation_pct * 100) }}%)</span>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">
+      {{ lt_cfg.strategy }} · rebalance every {{ lt_cfg.rebalance_freq_days }}d or drift &gt; {{ "%.0f"|format(lt_cfg.drift_threshold * 100) }}%
+    </p>
+
+    <table class="w-full text-sm mb-3">
+      <thead class="text-xs uppercase text-slate-400 border-b border-slate-800">
+        <tr>
+          <th class="text-left py-1.5 pr-2">Sym</th>
+          <th class="text-right py-1.5 pr-2">Target</th>
+          <th class="text-right py-1.5 pr-2">Shares</th>
+          <th class="text-right py-1.5">Avg cost</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for sym, weight in lt_cfg.universe.items() %}
+        {% set h = (lt_holdings|selectattr("symbol", "equalto", sym)|first) %}
+        <tr class="border-b border-slate-900">
+          <td class="py-1.5 pr-2 font-mono">{{ sym }}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{{ "%.1f"|format(weight * 100) }}%</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums {% if h %}text-emerald-300{% else %}text-slate-500{% endif %}">
+            {% if h %}{{ h.shares|int }}{% else %}—{% endif %}
+          </td>
+          <td class="py-1.5 text-right tabular-nums text-slate-400">
+            {% if h %}{{ "%.2f"|format(h.avg_cost) }}{% else %}—{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <p class="text-xs text-slate-500">
+      Last rebalance:
+      {% if last_rebalance %}
+        {{ last_rebalance.ts[:19].replace("T", " ") }} — {{ last_rebalance.reason }}
+      {% else %}
+        never (sleeve will rebalance on first cycle)
+      {% endif %}
+    </p>
+
+    <a href="/targets?sleeve=long_term" class="text-xs text-emerald-400 hover:text-emerald-200 mt-2 inline-block">
+      → Decision history (long-term only)
+    </a>
+  </section>
+
+  <!-- Tactical sleeve -->
+  <section class="rounded-lg border border-amber-900/50 bg-amber-950/20 p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-amber-300">Tactical — TA × Sentiment</h2>
+      <span class="text-amber-400 font-semibold">${{ "%.0f"|format(tc_equity) }} ({{ "%.0f"|format(tc_cfg.allocation_pct * 100) }}%)</span>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">
+      universe: {{ tc_cfg.universe|join(", ") }} · signal fusion: TA×{{ tc_cfg.ta_weight }} + sent×{{ tc_cfg.sentiment_weight }} ·
+      conf floor {{ "%.0f"|format(tc_cfg.confidence_floor * 100) }}% ·
+      target vol/bar {{ "%.2f"|format(tc_cfg.target_vol_per_bar * 100) }}% ·
+      max/sym {{ "%.0f"|format(tc_cfg.max_per_symbol_pct * 100) }}%
+    </p>
+
+    <table class="w-full text-sm mb-3">
+      <thead class="text-xs uppercase text-slate-400 border-b border-slate-800">
+        <tr>
+          <th class="text-left py-1.5 pr-2">Sym</th>
+          <th class="text-right py-1.5 pr-2">Shares</th>
+          <th class="text-right py-1.5">Avg cost</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for sym in tc_cfg.universe %}
+        {% set h = (tc_holdings|selectattr("symbol", "equalto", sym)|first) %}
+        <tr class="border-b border-slate-900">
+          <td class="py-1.5 pr-2 font-mono">{{ sym }}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums {% if h %}text-amber-300{% else %}text-slate-500{% endif %}">
+            {% if h %}{{ h.shares|int }}{% else %}flat{% endif %}
+          </td>
+          <td class="py-1.5 text-right tabular-nums text-slate-400">
+            {% if h %}{{ "%.2f"|format(h.avg_cost) }}{% else %}—{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <a href="/targets?sleeve=tactical" class="text-xs text-amber-400 hover:text-amber-200 inline-block">
+      → Decision history (tactical only)
+    </a>
+  </section>
+
+</div>
+
+<!-- Sentiment readings -->
+<section class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 mt-4">
+  <div class="flex items-baseline justify-between mb-3">
+    <h2 class="text-sm uppercase tracking-wider text-slate-400">Latest sentiment</h2>
+    <span class="text-xs text-slate-500">
+      provider <span class="font-mono text-slate-300">{{ sentiment_cfg.provider }}</span> ·
+      poll {{ sentiment_cfg.poll_interval_sec }}s ·
+      staleness cutoff {{ sentiment_cfg.staleness_sec }}s
+    </span>
+  </div>
+  <div id="sentiment-cells" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function loadSentiment() {
+    const r = await fetch("/api/sentiment");
+    const rows = await r.json();
+    const el = document.getElementById("sentiment-cells");
+    el.innerHTML = rows.map(row => {
+      const s = row.score;
+      let color = "text-slate-500", arrow = "—";
+      if (s !== null && s !== undefined) {
+        if (s > 0.15)      { color = "text-emerald-400"; arrow = "▲"; }
+        else if (s < -0.15){ color = "text-rose-400";    arrow = "▼"; }
+        else               { color = "text-slate-300";   arrow = "·"; }
+      }
+      const scoreStr = s === null || s === undefined ? "no data" : s.toFixed(2);
+      const tsStr = row.ts ? row.ts.slice(11,19) : "—";
+      return `
+        <div class="rounded border border-slate-800 bg-slate-950 p-3">
+          <div class="flex justify-between items-baseline">
+            <span class="font-mono">${row.symbol}</span>
+            <span class="text-xs text-slate-500">${tsStr}</span>
+          </div>
+          <div class="text-xl tabular-nums ${color}">${arrow} ${scoreStr}</div>
+          <div class="text-xs text-slate-500">${row.article_count || 0} articles</div>
+        </div>`;
+    }).join("");
+  }
+  loadSentiment();
+  setInterval(loadSentiment, 30000);
+</script>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% if events %}
+<ul class="text-xs font-mono space-y-0.5">
+  {% for e in events %}
+    <li class="flex gap-2 items-baseline">
+      <span class="text-slate-500">{{ e.ts[11:19] }}</span>
+      {% if e.level == 'error' %}
+        <span class="px-1.5 rounded bg-rose-900/40 text-rose-300">ERR</span>
+      {% elif e.level == 'warn' %}
+        <span class="px-1.5 rounded bg-amber-900/40 text-amber-300">WARN</span>
+      {% else %}
+        <span class="px-1.5 rounded bg-slate-800 text-slate-400">{{ e.level|upper }}</span>
+      {% endif %}
+      <span class="text-slate-400">[{{ e.source }}]</span>
+      <span class="text-slate-200 break-all">{{ e.message }}</span>
+    </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-slate-500 text-sm py-4 text-center">No events.</p>
+{% endif %}

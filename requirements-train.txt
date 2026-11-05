@@ -1,0 +1,7 @@
+# Extras for LSTM training and loading.
+# Not installed in the production Docker image because TensorFlow is ~500MB
+# and the live runner doesn't need it (XGBoost is the live path).
+# Install with:  pip install -r requirements-train.txt
+
+-r requirements.txt
+tensorflow>=2.15

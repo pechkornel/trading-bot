@@ -1,0 +1,26 @@
+[Unit]
+Description=Trading bot dashboard (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=%i
+# Edit these two paths to match your install:
+WorkingDirectory=/home/%i/trading-bot/bot
+EnvironmentFile=/home/%i/trading-bot/bot/.env
+ExecStart=/home/%i/trading-bot/bot/.venv/bin/uvicorn dashboard.app:app --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+# Block live ports at the firewall level too — paper-only deployment
+LimitNOFILE=8192
+
+# Hardening (safe defaults for a home server)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/%i/trading-bot/bot/logs /home/%i/trading-bot/bot/models/artifacts
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+<div class="flex items-center gap-3 text-xs">
+  {% if cfg.paper %}
+    <span class="px-2 py-1 rounded bg-emerald-900/60 border border-emerald-700 text-emerald-300">
+      PAPER · port {{ cfg.ib.port }}
+    </span>
+  {% else %}
+    <span class="px-2 py-1 rounded bg-red-900/60 border border-red-700 text-red-300">
+      ⚠ NON-PAPER MODE
+    </span>
+  {% endif %}
+  <span class="text-slate-400">
+    {{ processes|length }} process{{ '' if processes|length == 1 else 'es' }} running
+  </span>
+</div>

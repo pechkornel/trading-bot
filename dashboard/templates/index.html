@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Overview · Trading Bot{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+  <div class="lg:col-span-2 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">Confidence over time</h2>
+      <span class="text-xs text-slate-500">last 200 predictions</span>
+    </div>
+    <canvas id="confidenceChart" height="120"></canvas>
+  </div>
+  <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <h2 class="text-sm uppercase tracking-wider text-slate-400 mb-3">Active processes</h2>
+    {% if processes %}
+      <ul class="space-y-2 text-sm">
+        {% for p in processes %}
+        <li class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
+            <span class="font-mono truncate">{{ p.name }}</span>
+          </div>
+          <span class="text-xs text-slate-500">pid {{ p.pid }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No runners active. Start one from <a href="/control" class="underline">Control</a>.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+  <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">Recent predictions</h2>
+      <a href="/api/predictions" class="text-xs text-slate-500 hover:text-slate-300">JSON</a>
+    </div>
+    <div hx-get="/partials/predictions?limit=20" hx-trigger="load, every 5s" hx-swap="innerHTML">
+      {% include "partials/predictions.html" %}
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">Recent orders</h2>
+      <a href="/api/orders" class="text-xs text-slate-500 hover:text-slate-300">JSON</a>
+    </div>
+    <div hx-get="/partials/orders?limit=20" hx-trigger="load, every 5s" hx-swap="innerHTML">
+      {% include "partials/orders.html" %}
+    </div>
+  </div>
+</div>
+
+<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 mt-4">
+  <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-sm uppercase tracking-wider text-slate-400">Event log</h2>
+    <span class="text-xs text-slate-500">refreshes every 5s</span>
+  </div>
+  <div hx-get="/partials/events?limit=30" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    {% include "partials/events.html" %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function loadChart() {
+    const r = await fetch("/api/predictions?limit=200");
+    const rows = await r.json();
+    const labels = rows.map(p => (p.ts || "").slice(11,19));
+    const confidence = rows.map(p => (p.confidence || 0) * 100);
+    const bullish = rows.map(p => (p.prediction === 1 || p.prediction === 2) ? (p.confidence || 0) * 100 : null);
+
+    const ctx = document.getElementById("confidenceChart").getContext("2d");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Confidence %", data: confidence, borderColor: "rgb(148,163,184)", backgroundColor: "rgba(148,163,184,0.1)", tension: 0.2, pointRadius: 0, borderWidth: 1.5 },
+          { label: "Bullish", data: bullish, borderColor: "rgb(52,211,153)", backgroundColor: "rgba(52,211,153,0.2)", tension: 0.2, pointRadius: 2, borderWidth: 0, showLine: false },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: "#cbd5e1" } } },
+        scales: {
+          x: { ticks: { color: "#64748b", maxTicksLimit: 12 }, grid: { color: "#1e293b" } },
+          y: { ticks: { color: "#64748b" }, grid: { color: "#1e293b" }, suggestedMin: 0, suggestedMax: 100 },
+        },
+      },
+    });
+  }
+  loadChart();
+  setInterval(loadChart, 30000);
+</script>
+{% endblock %}

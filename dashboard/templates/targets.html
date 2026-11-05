@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Targets · Trading Bot{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-4">
+  <div>
+    <h1 class="text-xl font-semibold">Portfolio targets</h1>
+    {% if sleeve_filter %}
+      <p class="text-xs text-slate-400">
+        Filtered: <span class="font-mono text-slate-200">{{ sleeve_filter }}</span>
+        · <a href="/targets" class="underline">clear filter</a>
+      </p>
+    {% endif %}
+  </div>
+  <div class="flex gap-2 text-xs flex-wrap">
+    <a href="/targets" class="px-2 py-1 rounded {% if not sleeve_filter %}bg-slate-700 text-white{% else %}bg-slate-800 text-slate-300 hover:bg-slate-700{% endif %}">all</a>
+    <a href="/targets?sleeve=core" class="px-2 py-1 rounded {% if sleeve_filter == 'core' %}bg-emerald-700 text-white{% else %}bg-slate-800 text-slate-300 hover:bg-slate-700{% endif %}">core</a>
+    <a href="/targets?sleeve=sentiment" class="px-2 py-1 rounded {% if sleeve_filter == 'sentiment' %}bg-amber-700 text-white{% else %}bg-slate-800 text-slate-300 hover:bg-slate-700{% endif %}">sentiment</a>
+    <a href="/targets?sleeve=long_term" class="px-2 py-1 rounded {% if sleeve_filter == 'long_term' %}bg-slate-700 text-slate-300{% else %}bg-slate-800 text-slate-500 hover:bg-slate-700{% endif %}" title="legacy">long-term</a>
+    <a href="/targets?sleeve=tactical" class="px-2 py-1 rounded {% if sleeve_filter == 'tactical' %}bg-slate-700 text-slate-300{% else %}bg-slate-800 text-slate-500 hover:bg-slate-700{% endif %}" title="legacy">tactical</a>
+  </div>
+</div>
+
+{% if not cycles %}
+  <p class="text-slate-400">
+    No cycles yet. Start the portfolio runner from
+    <a href="/control" class="underline">Control</a>.
+  </p>
+{% else %}
+  {% for c in cycles %}
+  <section class="rounded-lg border border-slate-800 bg-slate-900/40 mb-4">
+    <header class="px-4 py-2 border-b border-slate-800 flex justify-between text-xs text-slate-400">
+      <span>cycle <span class="font-mono text-slate-300">{{ c.cycle_id }}</span></span>
+      <span>{{ c.ts[:19].replace("T", " ") }}</span>
+    </header>
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-400">
+        <tr>
+          <th class="text-left py-2 pl-4 pr-2">Sleeve</th>
+          <th class="text-left py-2 pr-2">Sym</th>
+          <th class="text-right py-2 pr-2">Pred</th>
+          <th class="text-right py-2 pr-2">Conf</th>
+          <th class="text-right py-2 pr-2">Sent</th>
+          <th class="text-right py-2 pr-2">Close</th>
+          <th class="text-right py-2 pr-2">RV</th>
+          <th class="text-right py-2 pr-2">Sig wt</th>
+          <th class="text-right py-2 pr-2">Vol scale</th>
+          <th class="text-right py-2 pr-2">Shares</th>
+          <th class="text-right py-2 pr-2">Position $</th>
+          <th class="text-left py-2 pr-4">Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in c.targets %}
+        <tr class="border-t border-slate-900">
+          <td class="py-1.5 pl-4 pr-2">
+            {% if t.sleeve == 'core' %}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300" title="core (medium-term)">CORE</span>
+            {% elif t.sleeve == 'sentiment' %}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300" title="sentiment satellite">SENT</span>
+            {% elif t.sleeve == 'long_term' %}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300" title="legacy long_term">LT</span>
+            {% else %}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300" title="legacy tactical">TAC</span>
+            {% endif %}
+          </td>
+          <td class="py-1.5 pr-2 font-mono">{{ t.symbol }}</td>
+          <td class="py-1.5 pr-2 text-right
+            {% if t.prediction == 1 or t.prediction == 2 %}text-emerald-400{% elif t.prediction is none %}text-slate-600{% else %}text-slate-400{% endif %}">{{ t.prediction if t.prediction is not none else '—' }}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{% if t.confidence is not none %}{{ "%.1f"|format(t.confidence * 100) }}%{% else %}—{% endif %}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums
+            {% if t.sentiment_score is none %}text-slate-600{% elif t.sentiment_score > 0.15 %}text-emerald-400{% elif t.sentiment_score < -0.15 %}text-rose-400{% else %}text-slate-300{% endif %}">
+            {% if t.sentiment_score is not none %}{{ "%+.2f"|format(t.sentiment_score) }}{% else %}—{% endif %}
+          </td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{{ "%.2f"|format(t.close_price or 0) }}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums text-slate-400">{% if t.realized_vol is not none %}{{ "%.4f"|format(t.realized_vol) }}{% else %}—{% endif %}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{% if t.signal_weight is not none %}{{ "%.2f"|format(t.signal_weight) }}{% else %}—{% endif %}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{% if t.vol_scale is not none %}{{ "%.2f"|format(t.vol_scale) }}{% else %}—{% endif %}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums
+            {% if t.target_shares > 0 %}text-emerald-300 font-semibold{% else %}text-slate-500{% endif %}">{{ t.target_shares }}</td>
+          <td class="py-1.5 pr-2 text-right tabular-nums">{{ "%.0f"|format(t.position_value or 0) }}</td>
+          <td class="py-1.5 pr-4 text-xs text-slate-500">{{ t.reason }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endfor %}
+{% endif %}
+{% endblock %}

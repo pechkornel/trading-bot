@@ -1,0 +1,3 @@
+/* Minimal overrides — Tailwind handles the rest. */
+html { color-scheme: dark; }
+.tabular-nums { font-variant-numeric: tabular-nums; }

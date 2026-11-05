@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Log · {{ name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-lg font-semibold font-mono">{{ name }}</h1>
+  <a href="/control" class="text-sm text-slate-400 hover:text-white">← back</a>
+</div>
+<pre class="text-xs bg-slate-950 border border-slate-800 rounded p-3 overflow-x-auto max-h-[70vh]">{{ content }}</pre>
+<p class="text-xs text-slate-500 mt-2">Showing last {{ lines }} lines. Refresh page to update.</p>
+{% endblock %}

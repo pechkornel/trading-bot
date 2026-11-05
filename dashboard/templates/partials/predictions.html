@@ -1,0 +1,33 @@
+{% if predictions %}
+<table class="w-full text-sm">
+  <thead class="text-xs uppercase text-slate-400 border-b border-slate-800">
+    <tr>
+      <th class="text-left py-2 pr-2">Time</th>
+      <th class="text-left py-2 pr-2">Symbol</th>
+      <th class="text-left py-2 pr-2">Model</th>
+      <th class="text-right py-2 pr-2">Pred</th>
+      <th class="text-right py-2 pr-2">Confidence</th>
+      <th class="text-right py-2 pr-2">Close</th>
+      <th class="text-right py-2">ATR</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in predictions %}
+    <tr class="border-b border-slate-900 hover:bg-slate-900/40">
+      <td class="py-1.5 pr-2 text-slate-400">{{ p.ts[11:19] }}</td>
+      <td class="py-1.5 pr-2 font-mono">{{ p.symbol }}</td>
+      <td class="py-1.5 pr-2 text-slate-400 truncate max-w-[14ch]">{{ p.model }}</td>
+      <td class="py-1.5 pr-2 text-right
+        {% if p.prediction == 1 or p.prediction == 2 %}text-emerald-400{% else %}text-slate-300{% endif %}">
+        {{ p.prediction }}
+      </td>
+      <td class="py-1.5 pr-2 text-right">{{ "%.1f"|format(p.confidence * 100) }}%</td>
+      <td class="py-1.5 pr-2 text-right tabular-nums">{{ "%.2f"|format(p.close_price or 0) }}</td>
+      <td class="py-1.5 text-right tabular-nums text-slate-400">{{ "%.4f"|format(p.atr or 0) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="text-slate-500 text-sm py-8 text-center">No predictions yet — start the runner from the Control page.</p>
+{% endif %}

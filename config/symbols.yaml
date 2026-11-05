@@ -1,0 +1,182 @@
+# Phase 8 — medium-to-long-term portfolio.
+#
+# Three sleeves now (one disabled):
+#
+#   core        — 70% of equity. Weekly score-based asset allocation across
+#                 10 ETFs. Composite score = 40% momentum + 30% macro
+#                 alignment + 30% trend. Holds top 4 equal-weighted. Hard
+#                 risk-off filter to bonds when SPY < 200d MA AND VIX > 25.
+#                 Typical hold: weeks to months.
+#
+#   sentiment   — 20% of equity. Alpha-Vantage-news-driven satellite (Phase 8B).
+#                 Longs only on bullish sentiment spikes (|score| > 0.4
+#                 with >=5 articles). 10-day hard exit or 5% stop. Max 4
+#                 concurrent, 5% of sleeve each.
+#
+#   tactical    — DISABLED. The 5-min XGBoost code stays in place; flip
+#                 `enabled: true` to bring it back.
+
+universe:
+  # ---- Core sleeve universe (10 ETFs: 4 equity, 3 bonds, 2 alts, 1 cash) ----
+  SPY:                                   # US large cap
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+    model: SPY_5min_xgboost              # legacy, only used if tactical re-enabled
+  IWM:                                   # US small cap
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  EFA:                                   # Developed international (EAFE)
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  VWO:                                   # Emerging markets
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  TLT:                                   # 20+ year Treasury bonds
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  IEF:                                   # 7-10 year Treasury bonds
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  AGG:                                   # Aggregate bond
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  GLD:                                   # Gold
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+    model: GLD_5min_xgboost              # legacy
+  DBC:                                   # Diversified commodities
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  BIL:                                   # 1-3 month T-bills (cash proxy)
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+
+  # ---- Sentiment satellite universe (high-news-flow tickers) ----
+  QQQ:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+    model: QQQ_5min_xgboost              # legacy
+  AAPL:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+    model: AAPL_5min_xgboost             # legacy
+  MSFT:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  NVDA:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  TSLA:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  AMZN:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  META:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+  GOOGL:
+    bar_size: "1 day"
+    history_duration: "2 Y"
+    timeframe_label: "daily"
+
+portfolio:
+  starting_equity: 100000.0
+  cycle_interval_sec: 3600               # one decision cycle per hour
+                                         # (core only acts on Friday close;
+                                         #  sentiment satellite acts daily;
+                                         #  most cycles will be no-ops)
+  reentry_cooldown_sec: 86400            # 1 day between same-symbol entries
+
+sleeves:
+  core:
+    enabled: true
+    allocation_pct: 0.70
+    # Universe used for ranking (must be a subset of `universe` above)
+    universe: [SPY, IWM, EFA, VWO, TLT, IEF, AGG, GLD, DBC, BIL]
+    # How many top-scored assets to hold each rebalance
+    hold_top_n: 4
+    # Score weights (must sum to 1.0)
+    momentum_weight: 0.40
+    macro_weight: 0.30
+    trend_weight: 0.30
+    # Momentum lookback in trading days
+    momentum_lookback_days: 252          # ~12 months
+    # Trend filter — price vs 200-day MA
+    trend_ma_days: 200
+    # Hard risk-off filter
+    risk_off_spy_ma_days: 200
+    risk_off_vix_threshold: 25.0
+    risk_off_universe: [TLT, IEF]        # what to hold when risk-off triggers
+    # Rebalance triggers
+    rebalance_day_of_week: 4             # 0=Mon, 4=Fri (Friday close eval)
+    drift_threshold: 0.08                # rebalance if any holding drifts >8%
+
+  sentiment:
+    enabled: true                        # Phase 8B: live
+    allocation_pct: 0.20
+    universe: [SPY, QQQ, AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL]
+    # Entry rules
+    sentiment_threshold: 0.4             # |score| must exceed
+    min_article_count: 5
+    max_concurrent_positions: 4
+    position_pct_of_sleeve: 0.05         # each position is 5% of sleeve equity
+    # Exit rules
+    hold_max_days: 10                    # hard exit after N trading days
+    stop_loss_pct: 0.05                  # 5% stop
+    # Direction
+    longs_only: true                     # no shorts
+
+  tactical:
+    enabled: false                       # the 5-min XGBoost sleeve, disabled
+    allocation_pct: 0.0
+    universe: [SPY, AAPL, QQQ, GLD]
+    ta_weight: 0.70
+    sentiment_weight: 0.30
+    target_vol_per_bar: 0.005
+    vol_lookback: 20
+    max_per_symbol_pct: 0.40
+    max_gross_pct: 1.0
+    confidence_floor: 0.55
+
+# Macro data feeds for the core sleeve scoring
+macro:
+  # FRED series IDs (free, no auth) — https://fred.stlouisfed.org/
+  fred_series:
+    yield_curve: T10Y2Y                  # 10Y - 2Y Treasury spread, %
+    fed_funds: DFF                       # Federal Funds Effective Rate, %
+    ten_year: DGS10                      # 10Y Treasury yield, %
+    two_year: DGS2                       # 2Y Treasury yield, %
+    cpi: CPIAUCSL                        # CPI All Urban (monthly, NSA)
+    unemployment: UNRATE                 # Unemployment Rate (monthly)
+  # yfinance tickers for things FRED doesn't carry
+  yf_tickers:
+    vix: "^VIX"
+    dxy: "DX-Y.NYB"
+    hyg: "HYG"                           # high-yield credit
+    lqd: "LQD"                           # investment-grade credit
+  cache_ttl_sec: 21600                   # 6h — macro doesn't change fast
+
+# Sentiment provider settings (Alpha Vantage News & Sentiment API)
+sentiment_provider:
+  provider: alpha_vantage
+  poll_interval_sec: 3600
+  staleness_sec: 86400                   # 24h — daily-cadence trading
+  symbols: [SPY, QQQ, AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL]

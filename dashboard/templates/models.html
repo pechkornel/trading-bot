@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Models · Trading Bot{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Model registry</h1>
+
+{% if models %}
+<div class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-xs uppercase text-slate-400 border-b border-slate-800">
+      <tr>
+        <th class="text-left p-3">Name</th>
+        <th class="text-left p-3">Type</th>
+        <th class="text-left p-3">Symbol</th>
+        <th class="text-left p-3">Timeframe</th>
+        <th class="text-right p-3">Test acc</th>
+        <th class="text-right p-3"># features</th>
+        <th class="text-left p-3">Saved</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in models %}
+      <tr class="border-b border-slate-900 hover:bg-slate-900/40">
+        <td class="p-3 font-mono">{{ m.name }}</td>
+        <td class="p-3">{{ m.model_type }}{% if m.classifier %} · {{ m.classifier }}{% endif %}</td>
+        <td class="p-3">{{ m.symbol or '—' }}</td>
+        <td class="p-3">{{ m.timeframe_label or m.bar_size or '—' }}</td>
+        <td class="p-3 text-right">
+          {% if m.test_accuracy is not none %}
+            {{ "%.2f"|format(m.test_accuracy * 100) }}%
+          {% elif m.final_val_accuracy is not none %}
+            {{ "%.2f"|format(m.final_val_accuracy * 100) }}%
+          {% else %}—{% endif %}
+        </td>
+        <td class="p-3 text-right">{{ m.features|length if m.features else '—' }}</td>
+        <td class="p-3 text-slate-400 text-xs">{{ (m.saved_at or '')[:19] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-slate-400">
+  Registry is empty. Train one from the
+  <a href="/control" class="underline">Control</a> page.
+</p>
+{% endif %}
+{% endblock %}

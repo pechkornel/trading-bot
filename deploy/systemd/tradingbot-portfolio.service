@@ -1,0 +1,24 @@
+[Unit]
+Description=Trading bot portfolio runner (multi-symbol)
+After=network-online.target tradingbot-dashboard.service tradingbot-cpgw-keeper.service
+Wants=network-online.target tradingbot-cpgw-keeper.service
+
+[Service]
+Type=exec
+User=%i
+WorkingDirectory=/home/%i/trading-bot/bot
+EnvironmentFile=/home/%i/trading-bot/bot/.env
+# Default: dry-run. To go live, change to: --live
+ExecStart=/home/%i/trading-bot/bot/.venv/bin/python -m live.portfolio_runner
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=8192
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/%i/trading-bot/bot/logs /home/%i/trading-bot/bot/models/artifacts
+
+[Install]
+WantedBy=default.target

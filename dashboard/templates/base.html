@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Trading Bot{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="min-h-screen font-sans antialiased">
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-6">
+        <a href="/" class="font-semibold tracking-tight text-lg">
+          <span class="text-emerald-400">●</span> Trading Bot
+        </a>
+        <nav class="flex gap-4 text-sm text-slate-300">
+          <a href="/" class="hover:text-white">Overview</a>
+          <a href="/sleeves" class="hover:text-white">Sleeves</a>
+          <a href="/targets" class="hover:text-white">Targets</a>
+          <a href="/models" class="hover:text-white">Models</a>
+          <a href="/control" class="hover:text-white">Control</a>
+        </nav>
+      </div>
+      <div hx-get="/partials/status" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
+    </div>
+  </header>
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="text-xs text-slate-500 text-center py-6">
+    Paper trading only · SQLite at <code>logs/bot.sqlite</code>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

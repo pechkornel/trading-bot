@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+logs/*.sqlite
+logs/*.log
+models/artifacts/*/model.pkl
+models/artifacts/*/model.keras
+models/artifacts/*/scaler.gz
