@@ -39,6 +39,20 @@ and every library choice is explained in [docs/TECH_STACK.md](docs/TECH_STACK.md
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    IB[IBKR Client Portal API<br/>paper account] -->|daily bars| F[core: indicators, features, scoring]
+    AV[Alpha Vantage<br/>news sentiment] --> SW[live: sentiment worker]
+    F --> S1[Core sleeve<br/>score-based ETF allocation]
+    SW --> S2[Sentiment sleeve]
+    M[models: XGBoost, LSTM<br/>registry] --> S3[Tactical sleeve]
+    S1 & S2 & S3 --> SZ[sizing: vol targeting, caps]
+    SZ --> R[live: portfolio runner<br/>dry run by default]
+    R -->|paper orders| IB
+    R --> DB[(SQLite)]
+    DB --> D[dashboard: FastAPI + HTMX]
+```
+
 ```
 core/        indicators, features, scoring, sizing, signal fusion, sleeves, config, broker client
 models/      training (XGBoost, LSTM) and the artifact registry
