@@ -9,3 +9,6 @@ logs/*.log
 models/artifacts/*/model.pkl
 models/artifacts/*/model.keras
 models/artifacts/*/scaler.gz
+
+# Claude Code subagent worktrees
+.claude/worktrees/
