@@ -8,7 +8,7 @@ Templates: Jinja2 server-rendered + HTMX polling. No build step.
 Styling: Tailwind via CDN. Charts: Chart.js via CDN.
 
 Run:
-    cd bot && uvicorn dashboard.app:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn dashboard.app:app --host 127.0.0.1 --port 8765 --reload   # from the repo root
 """
 
 from __future__ import annotations
