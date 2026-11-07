@@ -44,7 +44,7 @@ def _read_credentials() -> IbkrCredentials:
     password = os.getenv("IBKR_PASSWORD")
     if not user or not password:
         raise RuntimeError(
-            "IBKR_USERNAME and IBKR_PASSWORD must be set in bot/.env "
+            "IBKR_USERNAME and IBKR_PASSWORD must be set in .env "
             "(or your secret manager). The auth keeper has no way to log in without them."
         )
     return IbkrCredentials(
