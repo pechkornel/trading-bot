@@ -168,10 +168,10 @@ git clone <your-fork-url> /opt/trading-bot
 # Option B - rsync from your laptop:
 #   (on the laptop)
 #   rsync -avh --exclude='.venv' --exclude='__pycache__' --exclude='logs' \
-#       ./bot/ \
-#       user@192.168.x.x:/opt/trading-bot/bot/
+#       ./ \
+#       user@192.168.x.x:/opt/trading-bot/
 
-cd /opt/trading-bot/bot
+cd /opt/trading-bot
 ```
 
 ---
@@ -217,7 +217,7 @@ stat -c '%a %n' .env                         # expect: 600 .env
 ## 6. First run - bring everything up
 
 ```bash
-cd /opt/trading-bot/bot
+cd /opt/trading-bot
 docker compose --profile auto up -d --build
 
 # Watch logs while things spin up
@@ -301,12 +301,12 @@ against a non-paper port.
 ```bash
 crontab -e
 # add:
-15 3 * * *  /opt/trading-bot/bot/deploy/backup.sh
+15 3 * * *  /opt/trading-bot/deploy/backup.sh
 ```
 
 Writes `~/backups/tradingbot/tradingbot-YYYYMMDD-HHMMSS.tar.gz` containing
 SQLite logs, trained models, and the watchlist config. Keeps the last 14, prunes
-older. Restore with `tar -xzf <file>.tar.gz -C /opt/trading-bot/bot/`.
+older. Restore with `tar -xzf <file>.tar.gz -C /opt/trading-bot/`.
 
 ---
 

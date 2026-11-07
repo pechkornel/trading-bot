@@ -3,11 +3,11 @@
 # Keeps the last 14 backups.
 #
 # Cron example (run nightly at 03:15):
-#   15 3 * * *  /home/USER/trading-bot/bot/deploy/backup.sh
+#   15 3 * * *  /opt/trading-bot/deploy/backup.sh
 
 set -euo pipefail
 
-# Resolve the bot/ directory regardless of where this script is called from.
+# Resolve the repo root regardless of where this script is called from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOT_DIR="$(dirname "$SCRIPT_DIR")"
 
