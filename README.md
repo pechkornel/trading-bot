@@ -78,7 +78,7 @@ pip install -r requirements.txt            # add requirements-train.txt to train
 cp .env.example .env                       # fill in your own values
 
 python -m live.portfolio_runner --once     # one dry-run cycle of every enabled sleeve
-uvicorn dashboard.app:app --port 8080      # dashboard
+uvicorn dashboard.app:app --port 8765      # dashboard
 docker compose --profile auto up -d        # or everything in Docker
 ```
 

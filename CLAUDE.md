@@ -4,13 +4,14 @@ Self-hosted, paper-trading-only portfolio bot for Interactive Brokers (Client Po
 
 ## Commands
 
-No pyproject.toml, no tests folder, no lint/format config, no `.github/workflows`. Dependencies live in `requirements.txt` and `requirements-train.txt`.
+No pyproject.toml, no lint/format config, no `.github/workflows`. Dependencies live in `requirements.txt`, `requirements-train.txt` and `requirements-dev.txt` (pytest). Tests are in `tests/` (small, config only so far).
 
 ```sh
 # Setup (Windows venv python: .venv\Scripts\python, Linux: .venv/bin/python)
 uv venv --python 3.11
 uv pip install -r requirements.txt
 uv pip install -r requirements-train.txt   # only for LSTM training (adds TensorFlow)
+uv pip install -r requirements-dev.txt     # pytest
 cp .env.example .env                       # then fill in your own values
 
 # Portfolio runner (dry run is the default; --live sends paper orders)
@@ -22,8 +23,8 @@ python -m live.cpgw_keeper [--once]        # CPGW login + keepalive, writes logs
 python -m live.sentiment_worker [--once] [--interval SEC]
 python -m live.runner --symbol SPY --model <registry_name> [--quantity N] [--live]   # single-symbol tactical runner
 
-# Dashboard (README uses 8080, docker-compose and deploy docs use 8765)
-uvicorn dashboard.app:app --port 8080
+# Dashboard (port 8765 everywhere: README, Dockerfile, docker-compose, systemd, deploy docs)
+uvicorn dashboard.app:app --port 8765
 
 # Training (needs a valid CPGW session first, see Gotchas)
 python -m scripts.train_symbol --symbol SPY --kind xgboost [--classifier binary|multiclass] [--name NAME] [--no-smote]
@@ -56,16 +57,16 @@ Data flow: CPGW daily bars and Alpha Vantage news go through `core` (indicators,
 
 ## Gotchas
 
-- Safety: `PAPER=true` and `IB_PORT=5000` are both required. `core.config.assert_paper_mode()` raises before any broker connection otherwise (its error text still mentions 4002/7497, but only 5000 is allowed: `PAPER_PORTS = {5000}`). `DRY_RUN` defaults to true, and orders are sent only when `--live` is passed. The dashboard still starts when the lock fails, so you can see the misconfiguration.
+- Safety: `PAPER=true` and `IB_PORT=5000` are both required. `core.config.assert_paper_mode()` raises before any broker connection otherwise (only 5000, the Client Portal Gateway port, is allowed: `PAPER_PORTS = {5000}`). `DRY_RUN` defaults to true, and orders are sent only when `--live` is passed. The dashboard still starts when the lock fails, so you can see the misconfiguration.
 - The IBKR Client Portal Gateway is IBKR's Java daemon, run separately on the host at `https://localhost:5000` (not part of this repo or compose). Container services use `network_mode: host` to reach it.
 - `core/ibkr_auth.py` is a stub in this public repo (the SRP login is not published). `live/cpgw_keeper.py` therefore cannot log in automatically here. Log in to the gateway manually in a browser, or supply your own `login()`. Training and the runners need `logs/cpgw_session.json` written by the keeper.
 - `.env` variable names (see `.env.example`): `PAPER`, `DRY_RUN`, `IB_HOST`, `IB_PORT`, `IB_CLIENT_ID`, `IBKR_USERNAME`, `IBKR_PASSWORD`, `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_RECIPIENTS`, `ALPHA_VANTAGE_API_KEY`. The Alpha Vantage key is only needed if `sentiment.provider: alpha_vantage` in `config/symbols.yaml`; use the `stub` provider for testing.
 - Git-ignored: `.env`, `.venv/`, `logs/*.sqlite`, `logs/*.log`, `models/artifacts/*/model.pkl`, `model.keras`, `scaler.gz`. A fresh clone has no trained models and no `logs/` directory, so train or copy artifacts before enabling the tactical sleeve. Only `metadata.json` and the legacy README are tracked.
 - Legacy models in `models/artifacts/legacy/` have unknown provenance (no registry metadata); treat them as baselines, not production models.
 - TensorFlow is only in `requirements-train.txt`. The Docker image installs `requirements.txt` only, so LSTM models cannot be loaded or trained there.
-- There is no test suite, so verify changes by running a dry-run cycle (`--once`) against a paper gateway, never `--live`.
+- The test suite (`python -m pytest -q`) only covers config and the paper lock. Also verify changes by running a dry-run cycle (`--once`) against a paper gateway, never `--live`.
 - Windows vs Linux: use `.venv\Scripts\python` on Windows and `.venv/bin/python` on Linux. `deploy/backup.sh` and the systemd units are Linux only. `dashboard/process.py` launches workers with `sys.executable`, so start uvicorn from the venv.
-- The deploy docs still reference an older layout (`/opt/trading-bot/bot`, `/home/USER/trading-bot/bot` in the systemd units, and a `"ib_port":4002` health example). Adjust paths for this repo, where the root is the project directory.
+- Deploy docs, systemd units and `deploy/backup.sh` assume the repo is cloned at `/opt/trading-bot` (the repo root is the project directory, there is no `bot/` subfolder). Edit the unit paths if you clone elsewhere.
 - The dashboard has no authentication. Never expose its port to the public internet.
 
 ## Deployment

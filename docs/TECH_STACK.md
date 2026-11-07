@@ -173,7 +173,7 @@ The full philosophy: **avoid frameworks until you've felt the pain they solve.**
 ## File / directory layout
 
 ```
-bot/
+trading-bot/
 ├── core/                     ← pure logic, no I/O side effects beyond DB/HTTP wrappers
 │   ├── config.py             ← all settings (env + YAML); paper-mode lock lives here
 │   ├── indicators.py         ← ADX, ATR, BB, MACD, OBV, RSI, LRC, ...

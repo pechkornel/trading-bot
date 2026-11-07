@@ -3,7 +3,7 @@ Notifications.
 
 Replaces trading_bot_1_for_tests/email_sender.py with:
   - correct signature: send_email(subject, text)  (old code called it with just text)
-  - .env path resolved from bot/ project root (old code had hardcoded /Users/.../trading_bot_1/.env)
+  - .env path resolved from the repo root (old code had hardcoded /Users/.../trading_bot_1/.env)
   - recipients list read from EMAIL_RECIPIENTS env (comma-separated), falls back to EMAIL_USER
   - silently no-ops if EMAIL_USER/EMAIL_PASS are missing — useful for dev / dashboard-only mode
 
@@ -38,7 +38,7 @@ def send_email(subject: str, text: str) -> bool:
     """
     Send an email via Gmail SMTP. Returns True on success, False otherwise.
 
-    Required env vars (in bot/.env):
+    Required env vars (in .env at the repo root):
         EMAIL_USER, EMAIL_PASS
     Optional:
         EMAIL_RECIPIENTS  — comma-separated list, defaults to EMAIL_USER
