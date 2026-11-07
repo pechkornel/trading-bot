@@ -257,9 +257,8 @@ def assert_paper_mode(cfg: AppConfig) -> None:
     if cfg.ib.port not in PAPER_PORTS:
         raise RuntimeError(
             f"Refusing to start: IB_PORT={cfg.ib.port} is not a paper port. "
-            f"Allowed paper ports: {sorted(PAPER_PORTS)} "
-            f"(4002 = IB Gateway paper, 7497 = TWS paper). "
-            f"Live ports (4001 / 7496) are blocked."
+            f"Allowed: {sorted(PAPER_PORTS)} (IBKR Client Portal Gateway). "
+            f"Set IB_PORT={min(PAPER_PORTS)} in .env."
         )
 
 
