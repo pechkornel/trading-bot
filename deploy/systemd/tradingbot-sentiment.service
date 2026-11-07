@@ -1,23 +1,23 @@
 [Unit]
 Description=Trading bot sentiment worker (polls news/sentiment provider)
-After=network-online.target tradingbot-dashboard.service
+After=network-online.target tradingbot-dashboard@%i.service
 Wants=network-online.target
 
 [Service]
 Type=exec
 User=%i
-WorkingDirectory=/home/%i/trading-bot/bot
-EnvironmentFile=/home/%i/trading-bot/bot/.env
-ExecStart=/home/%i/trading-bot/bot/.venv/bin/python -m live.sentiment_worker
+WorkingDirectory=/opt/trading-bot
+EnvironmentFile=/opt/trading-bot/.env
+ExecStart=/opt/trading-bot/.venv/bin/python -m live.sentiment_worker
 Restart=on-failure
 RestartSec=30
 LimitNOFILE=8192
 
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/%i/trading-bot/bot/logs
+ReadWritePaths=-/opt/trading-bot/logs
 
 [Install]
 WantedBy=default.target

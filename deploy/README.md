@@ -24,7 +24,7 @@ Pick one. Both end with a dashboard you reach via Tailscale.
   No GUI required, just a JVM. Once it's up, `curl -k https://localhost:5000/`
   should return the login page HTML.
 - The `cpgw_keeper` service runs the SRP-6a login automatically - you never need
-  to open the CPGW web UI. Credentials live in `bot/.env` (`IBKR_USERNAME`,
+  to open the CPGW web UI. Credentials live in `.env` at the repo root (`IBKR_USERNAME`,
   `IBKR_PASSWORD`); they go through SRP so the password never crosses the wire
   in plaintext.
 
@@ -42,7 +42,7 @@ Pick one. Both end with a dashboard you reach via Tailscale.
 sudo mkdir -p /opt/trading-bot
 sudo chown "$USER":"$USER" /opt/trading-bot
 git clone <your-fork-or-archive> /opt/trading-bot
-cd /opt/trading-bot/bot
+cd /opt/trading-bot
 
 # secrets - rotate the Gmail app password that was on Desktop
 cp .env.example .env
@@ -81,7 +81,7 @@ sudo usermod -aG docker "$USER"
 
 ### Start the dashboard
 ```bash
-cd /opt/trading-bot/bot
+cd /opt/trading-bot
 docker compose up -d --build
 docker compose ps
 # dashboard reachable on http://127.0.0.1:8765
@@ -132,7 +132,8 @@ sudo apt install -y python3.11 python3.11-venv python3.11-dev build-essential
 
 ### Set up the venv
 ```bash
-cd /opt/trading-bot/bot
+cd /opt/trading-bot
+mkdir -p logs          # the units mount logs/ and models/artifacts/ read-write
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -140,15 +141,17 @@ pip install -r requirements.txt
 
 ### Install the systemd units
 
-The two unit files are templates (`%i` expands to the user instance). Replace `user` with your username, then:
+The unit files are templates (`%i` expands to the user instance, which the service runs as). They assume the repo is cloned at `/opt/trading-bot`. Replace `user` with your username, then:
 
 ```bash
 sudo cp deploy/systemd/tradingbot-dashboard.service /etc/systemd/system/tradingbot-dashboard@.service
 sudo cp deploy/systemd/tradingbot-portfolio.service /etc/systemd/system/tradingbot-portfolio@.service
+# optional: sentiment worker and CPGW keeper
+sudo cp deploy/systemd/tradingbot-sentiment.service /etc/systemd/system/tradingbot-sentiment@.service
+sudo cp deploy/systemd/tradingbot-cpgw-keeper.service /etc/systemd/system/tradingbot-cpgw-keeper@.service
 
-# edit the WorkingDirectory paths if your install isn't at /home/USER/trading-bot
-sudo $EDITOR /etc/systemd/system/tradingbot-dashboard@.service
-sudo $EDITOR /etc/systemd/system/tradingbot-portfolio@.service
+# only needed if your clone is not at /opt/trading-bot: edit WorkingDirectory, EnvironmentFile,
+# ExecStart and ReadWritePaths in each unit
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now tradingbot-dashboard@user
@@ -189,17 +192,17 @@ For external services that need callbacks (none right now, but in case Phase 6 a
 
 ```bash
 # Run once to confirm it works:
-/opt/trading-bot/bot/deploy/backup.sh
+/opt/trading-bot/deploy/backup.sh
 
 # Schedule nightly at 03:15 UTC:
 crontab -e
 # add:
-15 3 * * *  /opt/trading-bot/bot/deploy/backup.sh
+15 3 * * *  /opt/trading-bot/deploy/backup.sh
 ```
 
 Outputs to `~/backups/tradingbot/tradingbot-YYYYMMDD-HHMMSS.tar.gz`. Keeps the last 14 by default (`TRADINGBOT_BACKUP_KEEP` env override). Contains `logs/`, `models/artifacts/`, and `config/symbols.yaml`.
 
-To restore: `tar -xzf <file>.tar.gz -C /opt/trading-bot/bot/`.
+To restore: `tar -xzf <file>.tar.gz -C /opt/trading-bot/`.
 
 ---
 
@@ -212,7 +215,7 @@ To restore: `tar -xzf <file>.tar.gz -C /opt/trading-bot/bot/`.
 | Restart bot | `docker compose --profile auto restart portfolio` | `sudo systemctl restart tradingbot-portfolio@USER` |
 | Pull updates | `git pull && docker compose --profile auto up -d --build` | `git pull && sudo systemctl restart tradingbot-*` |
 | Stop everything | `docker compose --profile auto down` | `sudo systemctl stop tradingbot-*` |
-| Train a model | dashboard /control, or `docker compose run --rm dashboard python -m scripts.train_symbol --symbol SPY --kind xgboost` | `sudo -u USER /opt/trading-bot/bot/.venv/bin/python -m scripts.train_symbol --symbol SPY --kind xgboost` |
+| Train a model | dashboard /control, or `docker compose run --rm dashboard python -m scripts.train_symbol --symbol SPY --kind xgboost` | `sudo -u USER /opt/trading-bot/.venv/bin/python -m scripts.train_symbol --symbol SPY --kind xgboost` |
 
 ---
 
@@ -221,7 +224,7 @@ To restore: `tar -xzf <file>.tar.gz -C /opt/trading-bot/bot/`.
 After deploy, sanity-check:
 ```bash
 docker compose exec dashboard curl -fsS http://127.0.0.1:8765/api/health
-# expect:  {"ok":true,"paper":true,"ib_port":4002,...}
+# expect:  {"ok":true,"paper":true,"ib_port":5000,...}
 ```
 
-If you ever see `"paper":false` or `"ib_port":4001`/`7496`, the bot will refuse to start any IB connection (`core.config.assert_paper_mode` raises before the socket opens). The dashboard will still come up so you can see what's misconfigured.
+If you ever see `"paper":false` or any `"ib_port"` other than `5000`, the bot will refuse to start any IB connection (`core.config.assert_paper_mode` raises before the socket opens). The dashboard will still come up so you can see what's misconfigured.
