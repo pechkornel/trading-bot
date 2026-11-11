@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 import pandas as pd
-
 
 # ---- bar size / period translation ---------------------------------------
 # Old config (TWS notation) → CPGW notation.

@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from core.config import assert_paper_mode, load_app_config, load_symbol, SymbolConfig
+from core.config import SymbolConfig, assert_paper_mode, load_app_config, load_symbol
 from core.cpgw_client import CPGWClient, NotAuthenticatedError
 from core.features import get_features
 from core.indicators import calculate_indicators, capitalize_columns
@@ -34,7 +34,6 @@ from live.cpgw_keeper import read_session
 from live.notifier import format_trade_alert, send_email
 from live.storage import Storage
 from models.registry import load_model
-
 
 # Bullish classes for binary (1) and multiclass (2) models.
 BULLISH_CLASSES = {1, 2}

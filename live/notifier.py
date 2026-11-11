@@ -17,12 +17,10 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
 
 from dotenv import load_dotenv
 
 from core.config import ROOT
-
 
 _ENV_LOADED = False
 

@@ -30,12 +30,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-import numpy as np
 import pandas as pd
 
 from core.config import CoreSleeveConfig
 from core.macro import MacroSnapshot
-
 
 # ---- asset classification ----
 # Each ETF in the core universe belongs to one of these buckets. Used by the

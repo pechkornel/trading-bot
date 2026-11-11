@@ -23,7 +23,6 @@ from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
-
 # US Eastern is UTC-5 (EST) or UTC-4 (EDT). Python's stdlib doesn't ship full
 # tz data on all platforms; we approximate by detecting DST manually. For our
 # use case (gating evaluations), being off by one hour around DST flips is fine.

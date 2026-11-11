@@ -20,9 +20,9 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
 
 @dataclass

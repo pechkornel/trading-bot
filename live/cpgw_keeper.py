@@ -26,14 +26,12 @@ import os
 import signal
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from core.config import LOGS_DIR, assert_paper_mode, load_app_config
 from core.cpgw_client import CPGWClient
-from core.ibkr_auth import IbkrCredentials, IBKRAuthError, MaxLoginAttempts, login
+from core.ibkr_auth import IBKRAuthError, IbkrCredentials, MaxLoginAttempts, login
 from live.storage import Storage
-
 
 SESSION_FILE = LOGS_DIR / "cpgw_session.json"
 
