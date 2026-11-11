@@ -25,7 +25,7 @@ import pandas as pd
 
 from core.config import CoreSleeveConfig
 from core.macro import MacroSnapshot
-from core.scoring import AssetScore, ScoringResult, score_universe, select_holdings
+from core.scoring import AssetScore, score_universe, select_holdings
 
 
 @dataclass

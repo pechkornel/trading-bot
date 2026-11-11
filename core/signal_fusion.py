@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 BULLISH_CLASSES: frozenset[int] = frozenset({1, 2})
 
 

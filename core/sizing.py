@@ -32,7 +32,6 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-
 # Predictions considered "bullish enough to open a long". Multiclass: 2 = uptrend,
 # Binary: 1 = uptrend.
 BULLISH_CLASSES: frozenset[int] = frozenset({1, 2})

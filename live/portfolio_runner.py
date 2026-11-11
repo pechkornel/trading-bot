@@ -29,14 +29,16 @@ import signal
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
-from datetime import datetime, timezone
-
 from core.config import (
+    MacroConfig,
+    PortfolioConfig,
+    SentimentConfig,
+    SymbolConfig,
     assert_paper_mode,
     load_app_config,
     load_macro_config,
@@ -44,13 +46,6 @@ from core.config import (
     load_portfolio,
     load_sentiment_config,
     load_symbol,
-    CoreSleeveConfig,
-    MacroConfig,
-    PortfolioConfig,
-    SentimentConfig,
-    SentimentSatelliteConfig,
-    SymbolConfig,
-    TacticalSleeveConfig,
 )
 from core.cpgw_client import CPGWClient, NotAuthenticatedError
 from core.indicators import capitalize_columns
@@ -68,13 +63,10 @@ from core.sleeves import (
     CoreSleeve,
     Position,
     SatelliteCycleResult,
-    SatelliteEntry,
-    SatelliteExit,
     SentimentInput,
     SentimentSatelliteSleeve,
 )
 from live.cpgw_keeper import read_session
-from live.notifier import format_trade_alert, send_email
 from live.storage import Storage
 
 

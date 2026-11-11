@@ -23,7 +23,6 @@ from typing import Optional
 
 from core.config import LOGS_DIR, ROOT
 
-
 STATE_FILE = LOGS_DIR / "processes.json"
 
 

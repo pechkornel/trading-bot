@@ -18,7 +18,6 @@ import joblib
 
 from core.config import ARTIFACTS_DIR
 
-
 LEGACY_DIR = ARTIFACTS_DIR / "legacy"
 
 

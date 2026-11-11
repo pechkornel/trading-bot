@@ -16,19 +16,16 @@ hitting FRED's rate limits.
 
 from __future__ import annotations
 
-import csv
 import io
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
 
 from core.config import MacroConfig
-
 
 _FRED_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 _HTTP_TIMEOUT = 30.0

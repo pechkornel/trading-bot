@@ -21,7 +21,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from core.config import (
-    LOGS_DIR,
     load_app_config,
     load_portfolio,
     load_sentiment_config,
@@ -30,7 +29,6 @@ from core.config import (
 from dashboard import process as procmgr
 from live.storage import Storage
 from models.registry import list_models
-
 
 BASE_DIR = Path(__file__).resolve().parent
 

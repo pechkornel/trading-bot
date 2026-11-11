@@ -17,10 +17,9 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from core.config import LOGS_DIR
-
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS predictions (

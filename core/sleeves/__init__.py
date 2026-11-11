@@ -19,7 +19,7 @@ from core.sleeves.sentiment_satellite import (
     SentimentInput,
     SentimentSatelliteSleeve,
 )
-from core.sleeves.tactical import TacticalSleeve, TacticalDecision, TacticalInput
+from core.sleeves.tactical import TacticalDecision, TacticalInput, TacticalSleeve
 
 __all__ = [
     "CoreSleeve",
