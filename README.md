@@ -1,5 +1,7 @@
 # Trading bot
 
+[![CI](https://github.com/pechkornel/trading-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/pechkornel/trading-bot/actions/workflows/ci.yml)
+
 A self-hosted, **paper-trading-only** portfolio bot for Interactive Brokers, built in Python.
 It started as four separate experiments (an XGBoost trend classifier, an LSTM model, a test
 bot and a backtester) and was consolidated into one codebase with a model registry, a
