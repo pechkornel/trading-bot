@@ -1,0 +1,22 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# extend-exclude keeps ruff's default excludes (.venv, .git, __pycache__, ...).
+# `exclude` would replace them.
+extend-exclude = ["core/ibkr_auth.py"]
+# Without this, `ruff format core/ibkr_auth.py` (explicit path, editors,
+# pre-commit) would still format the file.
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "dashboard", "live", "models", "scripts", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
