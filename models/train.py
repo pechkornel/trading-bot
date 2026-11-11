@@ -81,10 +81,13 @@ def train_xgboost(
     from xgboost import XGBClassifier
 
     X, y = _prepare(df, features, threshold, future_n, classifier)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=random_state)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=random_state
+    )
 
     if use_smote:
         from imblearn.over_sampling import SMOTE
+
         X_train, y_train = SMOTE(random_state=random_state).fit_resample(X_train, y_train)
 
     if classifier == "multiclass":
@@ -222,7 +225,8 @@ def train_lstm(
     print("Class weights:", cw_dict)
 
     history = model.fit(
-        X_train, y_train,
+        X_train,
+        y_train,
         epochs=epochs,
         batch_size=batch_size,
         validation_data=(X_test, y_test),

@@ -37,7 +37,11 @@ def probe(path: Path) -> dict:
         if hasattr(obj, attr):
             value = getattr(obj, attr)
             try:
-                info[attr] = list(value) if hasattr(value, "__iter__") and not isinstance(value, str) else value
+                info[attr] = (
+                    list(value)
+                    if hasattr(value, "__iter__") and not isinstance(value, str)
+                    else value
+                )
             except Exception:
                 info[attr] = str(value)
 
@@ -63,8 +67,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No legacy dir at {LEGACY_DIR}")
         return 1
 
-    files = [LEGACY_DIR / args.file] if args.file else sorted(
-        p for p in LEGACY_DIR.iterdir() if p.suffix in {".pkl", ".gz"}
+    files = (
+        [LEGACY_DIR / args.file]
+        if args.file
+        else sorted(p for p in LEGACY_DIR.iterdir() if p.suffix in {".pkl", ".gz"})
     )
 
     for f in files:

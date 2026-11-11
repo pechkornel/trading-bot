@@ -111,9 +111,12 @@ class Runner:
             try:
                 self._cycle()
             except NotAuthenticatedError as e:
-                self.storage.log_event("warn", "runner",
-                    f"session expired ({e}); cpgw_keeper should re-login. Sleeping.")
-            except Exception as e:                       # noqa: BLE001
+                self.storage.log_event(
+                    "warn",
+                    "runner",
+                    f"session expired ({e}); cpgw_keeper should re-login. Sleeping.",
+                )
+            except Exception as e:  # noqa: BLE001
                 self.storage.log_event("error", "runner", f"cycle error: {e}")
                 print(f"[runner] cycle error: {e}")
             elapsed = time.time() - cycle_start
@@ -181,8 +184,10 @@ class Runner:
             atr=atr,
             features={k: float(v) for k, v in last.iloc[0].items()},
         )
-        print(f"[{self.symbol}] close={close:.2f}  atr={atr:.4f}  "
-              f"pred={prediction}  conf={confidence:.1%}")
+        print(
+            f"[{self.symbol}] close={close:.2f}  atr={atr:.4f}  "
+            f"pred={prediction}  conf={confidence:.1%}"
+        )
 
         if (
             confidence >= self.sym_cfg.trading.confidence_threshold
@@ -198,48 +203,83 @@ class Runner:
 
         if self.dry_run:
             order_id = self.storage.log_order(
-                symbol=self.symbol, action="BUY", quantity=self.quantity,
-                entry_price=entry, tp_price=tp, stop_price=stop,
-                parent_id=None, tp_id=None, stop_id=None,
-                dry_run=True, status="logged",
+                symbol=self.symbol,
+                action="BUY",
+                quantity=self.quantity,
+                entry_price=entry,
+                tp_price=tp,
+                stop_price=stop,
+                parent_id=None,
+                tp_id=None,
+                stop_id=None,
+                dry_run=True,
+                status="logged",
                 note=f"conf={confidence:.3f}",
             )
-            print(f"[{self.symbol}] DRY-RUN BUY ×{self.quantity} "
-                  f"entry={entry} tp={tp} stop={stop} (id={order_id})")
+            print(
+                f"[{self.symbol}] DRY-RUN BUY ×{self.quantity} "
+                f"entry={entry} tp={tp} stop={stop} (id={order_id})"
+            )
         else:
             assert self.client is not None
             try:
                 tickets = self.client.place_bracket_order(
-                    symbol=self.symbol, quantity=self.quantity,
-                    entry_price=entry, take_profit_price=tp,
+                    symbol=self.symbol,
+                    quantity=self.quantity,
+                    entry_price=entry,
+                    take_profit_price=tp,
                     stop_loss_price=stop,
                 )
                 parent, take_profit, stop_t = tickets + [None, None, None]
                 self.storage.log_order(
-                    symbol=self.symbol, action="BUY", quantity=self.quantity,
-                    entry_price=entry, tp_price=tp, stop_price=stop,
-                    parent_id=int(parent.order_id) if parent and parent.order_id.isdigit() else None,
-                    tp_id=int(take_profit.order_id) if take_profit and take_profit.order_id.isdigit() else None,
+                    symbol=self.symbol,
+                    action="BUY",
+                    quantity=self.quantity,
+                    entry_price=entry,
+                    tp_price=tp,
+                    stop_price=stop,
+                    parent_id=int(parent.order_id)
+                    if parent and parent.order_id.isdigit()
+                    else None,
+                    tp_id=int(take_profit.order_id)
+                    if take_profit and take_profit.order_id.isdigit()
+                    else None,
                     stop_id=int(stop_t.order_id) if stop_t and stop_t.order_id.isdigit() else None,
-                    dry_run=False, status="placed",
+                    dry_run=False,
+                    status="placed",
                     note=f"conf={confidence:.3f}",
                 )
-                print(f"[{self.symbol}] PAPER BUY ×{self.quantity} "
-                      f"entry={entry} tp={tp} stop={stop} ids={[t.order_id for t in tickets if t]}")
-            except Exception as e:                       # noqa: BLE001
+                print(
+                    f"[{self.symbol}] PAPER BUY ×{self.quantity} "
+                    f"entry={entry} tp={tp} stop={stop} ids={[t.order_id for t in tickets if t]}"
+                )
+            except Exception as e:  # noqa: BLE001
                 self.storage.log_event("error", "runner", f"order placement failed: {e}")
                 self.storage.log_order(
-                    symbol=self.symbol, action="BUY", quantity=self.quantity,
-                    entry_price=entry, tp_price=tp, stop_price=stop,
-                    parent_id=None, tp_id=None, stop_id=None,
-                    dry_run=False, status="failed", note=str(e),
+                    symbol=self.symbol,
+                    action="BUY",
+                    quantity=self.quantity,
+                    entry_price=entry,
+                    tp_price=tp,
+                    stop_price=stop,
+                    parent_id=None,
+                    tp_id=None,
+                    stop_id=None,
+                    dry_run=False,
+                    status="failed",
+                    note=str(e),
                 )
                 return
 
         subject, body = format_trade_alert(
-            symbol=self.symbol, action="BUY", quantity=self.quantity,
-            entry_price=entry, tp_price=tp, stop_price=stop,
-            confidence=confidence, dry_run=self.dry_run,
+            symbol=self.symbol,
+            action="BUY",
+            quantity=self.quantity,
+            entry_price=entry,
+            tp_price=tp,
+            stop_price=stop,
+            confidence=confidence,
+            dry_run=self.dry_run,
         )
         send_email(subject, body)
 
@@ -259,8 +299,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     runner = Runner(
-        symbol=args.symbol, model_name=args.model,
-        dry_run=args.dry_run, quantity=args.quantity,
+        symbol=args.symbol,
+        model_name=args.model,
+        dry_run=args.dry_run,
+        quantity=args.quantity,
         interval_override=args.interval,
     )
     runner.start()

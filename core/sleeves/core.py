@@ -31,14 +31,15 @@ from core.scoring import AssetScore, ScoringResult, score_universe, select_holdi
 @dataclass
 class CoreDecision:
     """One symbol's piece of a rebalance plan."""
+
     symbol: str
     target_weight: float
     target_value: float
     target_shares: int
     current_shares: int
-    delta_shares: int            # +ve = buy, -ve = sell, 0 = hold
+    delta_shares: int  # +ve = buy, -ve = sell, 0 = hold
     close_price: float
-    score: AssetScore | None     # None for risk-off bond positions not in scoring
+    score: AssetScore | None  # None for risk-off bond positions not in scoring
     reason: str
 
 
@@ -88,7 +89,10 @@ class CoreSleeve:
 
         # Calendar trigger
         if now.weekday() != self.cfg.rebalance_day_of_week:
-            return False, f"not rebalance day (today={now.strftime('%a')}, want={_day_name(self.cfg.rebalance_day_of_week)})"
+            return (
+                False,
+                f"not rebalance day (today={now.strftime('%a')}, want={_day_name(self.cfg.rebalance_day_of_week)})",
+            )
 
         # Don't rebalance more than once per calendar day
         if last_rebalance_ts is not None and last_rebalance_ts.date() == now.date():
@@ -153,20 +157,27 @@ class CoreSleeve:
             target_value = sleeve_equity * target_w
             target_shares = int(target_value / close)
             current = current_holdings.get(sym, 0)
-            decisions.append(CoreDecision(
-                symbol=sym,
-                target_weight=target_w,
-                target_value=target_shares * close,
-                target_shares=target_shares,
-                current_shares=current,
-                delta_shares=target_shares - current,
-                close_price=close,
-                score=scores_by_sym.get(sym),
-                reason=(
-                    "risk-off bond bucket" if (result.risk_off and target_w > 0)
-                    else (f"top {self.cfg.hold_top_n} by score" if target_w > 0 else "out of top set")
-                ),
-            ))
+            decisions.append(
+                CoreDecision(
+                    symbol=sym,
+                    target_weight=target_w,
+                    target_value=target_shares * close,
+                    target_shares=target_shares,
+                    current_shares=current,
+                    delta_shares=target_shares - current,
+                    close_price=close,
+                    score=scores_by_sym.get(sym),
+                    reason=(
+                        "risk-off bond bucket"
+                        if (result.risk_off and target_w > 0)
+                        else (
+                            f"top {self.cfg.hold_top_n} by score"
+                            if target_w > 0
+                            else "out of top set"
+                        )
+                    ),
+                )
+            )
 
         return CoreCycleResult(
             triggered=True,
@@ -178,6 +189,7 @@ class CoreSleeve:
 
 
 # ---- helpers ----
+
 
 def _last(series: pd.Series | None) -> float | None:
     if series is None or len(series) == 0:

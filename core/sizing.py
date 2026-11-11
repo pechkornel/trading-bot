@@ -41,12 +41,13 @@ BULLISH_CLASSES: frozenset[int] = frozenset({1, 2})
 @dataclass
 class SymbolSignal:
     """One symbol's snapshot at decision time."""
+
     symbol: str
     prediction: int
     confidence: float
     close: float
     atr: float
-    realized_vol: float       # std of pct returns over lookback bars
+    realized_vol: float  # std of pct returns over lookback bars
 
 
 @dataclass
@@ -63,11 +64,11 @@ class SizingDecision:
 @dataclass
 class PortfolioParams:
     starting_equity: float = 100_000.0
-    target_vol_per_bar: float = 0.005       # 0.5 % target per-symbol vol per bar
-    vol_lookback: int = 20                   # bars used to compute realized vol
-    max_per_symbol_pct: float = 0.30         # 30 % equity max per name
-    max_gross_pct: float = 1.0               # 100 % gross exposure max
-    confidence_floor: float = 0.55           # below this confidence, no position
+    target_vol_per_bar: float = 0.005  # 0.5 % target per-symbol vol per bar
+    vol_lookback: int = 20  # bars used to compute realized vol
+    max_per_symbol_pct: float = 0.30  # 30 % equity max per name
+    max_gross_pct: float = 1.0  # 100 % gross exposure max
+    confidence_floor: float = 0.55  # below this confidence, no position
     vol_scale_min: float = 0.1
     vol_scale_max: float = 5.0
 
@@ -88,15 +89,23 @@ def _size_one(
 ) -> SizingDecision:
     if sig.prediction not in BULLISH_CLASSES:
         return SizingDecision(
-            symbol=sig.symbol, target_shares=0, position_value=0.0,
-            signal_weight=0.0, vol_scale=0.0, realized_vol=sig.realized_vol,
+            symbol=sig.symbol,
+            target_shares=0,
+            position_value=0.0,
+            signal_weight=0.0,
+            vol_scale=0.0,
+            realized_vol=sig.realized_vol,
             reason=f"prediction={sig.prediction} not bullish",
         )
 
     if sig.confidence < params.confidence_floor:
         return SizingDecision(
-            symbol=sig.symbol, target_shares=0, position_value=0.0,
-            signal_weight=0.0, vol_scale=0.0, realized_vol=sig.realized_vol,
+            symbol=sig.symbol,
+            target_shares=0,
+            position_value=0.0,
+            signal_weight=0.0,
+            vol_scale=0.0,
+            realized_vol=sig.realized_vol,
             reason=f"confidence {sig.confidence:.3f} < floor {params.confidence_floor}",
         )
 
@@ -108,8 +117,12 @@ def _size_one(
     vol = max(sig.realized_vol, 1e-6) if np.isfinite(sig.realized_vol) else float("nan")
     if not np.isfinite(vol) or vol <= 0:
         return SizingDecision(
-            symbol=sig.symbol, target_shares=0, position_value=0.0,
-            signal_weight=signal_w, vol_scale=0.0, realized_vol=sig.realized_vol,
+            symbol=sig.symbol,
+            target_shares=0,
+            position_value=0.0,
+            signal_weight=signal_w,
+            vol_scale=0.0,
+            realized_vol=sig.realized_vol,
             reason="realized_vol unavailable",
         )
 
@@ -158,13 +171,15 @@ def size_portfolio(
             continue
         new_value = d.position_value * scale
         new_shares = int(new_value / max(sig.close, 1e-6))
-        scaled.append(SizingDecision(
-            symbol=d.symbol,
-            target_shares=new_shares,
-            position_value=new_shares * sig.close,
-            signal_weight=d.signal_weight,
-            vol_scale=d.vol_scale,
-            realized_vol=d.realized_vol,
-            reason=f"{d.reason}; gross-capped ×{scale:.3f}",
-        ))
+        scaled.append(
+            SizingDecision(
+                symbol=d.symbol,
+                target_shares=new_shares,
+                position_value=new_shares * sig.close,
+                signal_weight=d.signal_weight,
+                vol_scale=d.vol_scale,
+                realized_vol=d.realized_vol,
+                reason=f"{d.reason}; gross-capped ×{scale:.3f}",
+            )
+        )
     return scaled

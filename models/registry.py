@@ -93,6 +93,7 @@ def load_model(name: str) -> tuple[Any, dict[str, Any], Any | None]:
 
     if model_file.endswith(".keras"):
         from tensorflow.keras.models import load_model as keras_load
+
         model = keras_load(model_path)
     else:
         model = joblib.load(model_path)

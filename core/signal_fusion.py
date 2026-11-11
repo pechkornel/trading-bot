@@ -71,8 +71,8 @@ def fuse(
         sw = sentiment_weight / total
         combined_signal = tw * ta_signal + sw * sentiment_score
         reason = (
-            f"ta×{tw:.2f}={ta_signal*tw:+.3f}  "
-            f"sent×{sw:.2f}={sentiment_score*sw:+.3f}  "
+            f"ta×{tw:.2f}={ta_signal * tw:+.3f}  "
+            f"sent×{sw:.2f}={sentiment_score * sw:+.3f}  "
             f"sum={combined_signal:+.3f}"
         )
 

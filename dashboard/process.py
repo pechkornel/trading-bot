@@ -29,7 +29,7 @@ STATE_FILE = LOGS_DIR / "processes.json"
 
 @dataclass
 class ProcInfo:
-    name: str          # "runner:SPY" or "train:SPY:xgboost"
+    name: str  # "runner:SPY" or "train:SPY:xgboost"
     pid: int
     cmd: list[str]
     started_at: float
@@ -81,31 +81,48 @@ def get_process(name: str) -> Optional[ProcInfo]:
     return None
 
 
-def start_runner(symbol: str, model: str, *, dry_run: bool = True, quantity: float = 1.0) -> ProcInfo:
+def start_runner(
+    symbol: str, model: str, *, dry_run: bool = True, quantity: float = 1.0
+) -> ProcInfo:
     name = f"runner:{symbol}"
     if get_process(name) is not None:
         raise RuntimeError(f"Runner already active for {symbol}")
     log_path = LOGS_DIR / f"runner_{symbol}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable, "-m", "live.runner",
-        "--symbol", symbol,
-        "--model", model,
-        "--quantity", str(quantity),
+        sys.executable,
+        "-m",
+        "live.runner",
+        "--symbol",
+        symbol,
+        "--model",
+        model,
+        "--quantity",
+        str(quantity),
     ]
     cmd.append("--dry-run" if dry_run else "--live")
     log_fh = open(log_path, "a", buffering=1)
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT,
+        cmd,
+        cwd=ROOT,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     info = ProcInfo(
-        name=name, pid=proc.pid, cmd=cmd,
-        started_at=time.time(), log_path=str(log_path),
+        name=name,
+        pid=proc.pid,
+        cmd=cmd,
+        started_at=time.time(),
+        log_path=str(log_path),
     )
     state = _load_state()
-    state[name] = {"pid": info.pid, "cmd": info.cmd,
-                   "started_at": info.started_at, "log_path": info.log_path}
+    state[name] = {
+        "pid": info.pid,
+        "cmd": info.cmd,
+        "started_at": info.started_at,
+        "log_path": info.log_path,
+    }
     _save_state(state)
     return info
 
@@ -119,16 +136,26 @@ def start_cpgw_keeper() -> ProcInfo:
     cmd = [sys.executable, "-m", "live.cpgw_keeper"]
     log_fh = open(log_path, "a", buffering=1)
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT,
+        cmd,
+        cwd=ROOT,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     info = ProcInfo(
-        name=name, pid=proc.pid, cmd=cmd,
-        started_at=time.time(), log_path=str(log_path),
+        name=name,
+        pid=proc.pid,
+        cmd=cmd,
+        started_at=time.time(),
+        log_path=str(log_path),
     )
     state = _load_state()
-    state[name] = {"pid": info.pid, "cmd": info.cmd,
-                   "started_at": info.started_at, "log_path": info.log_path}
+    state[name] = {
+        "pid": info.pid,
+        "cmd": info.cmd,
+        "started_at": info.started_at,
+        "log_path": info.log_path,
+    }
     _save_state(state)
     return info
 
@@ -142,16 +169,26 @@ def start_sentiment_worker() -> ProcInfo:
     cmd = [sys.executable, "-m", "live.sentiment_worker"]
     log_fh = open(log_path, "a", buffering=1)
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT,
+        cmd,
+        cwd=ROOT,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     info = ProcInfo(
-        name=name, pid=proc.pid, cmd=cmd,
-        started_at=time.time(), log_path=str(log_path),
+        name=name,
+        pid=proc.pid,
+        cmd=cmd,
+        started_at=time.time(),
+        log_path=str(log_path),
     )
     state = _load_state()
-    state[name] = {"pid": info.pid, "cmd": info.cmd,
-                   "started_at": info.started_at, "log_path": info.log_path}
+    state[name] = {
+        "pid": info.pid,
+        "cmd": info.cmd,
+        "started_at": info.started_at,
+        "log_path": info.log_path,
+    }
     _save_state(state)
     return info
 
@@ -166,16 +203,26 @@ def start_portfolio(*, dry_run: bool = True) -> ProcInfo:
     cmd.append("--dry-run" if dry_run else "--live")
     log_fh = open(log_path, "a", buffering=1)
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT,
+        cmd,
+        cwd=ROOT,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     info = ProcInfo(
-        name=name, pid=proc.pid, cmd=cmd,
-        started_at=time.time(), log_path=str(log_path),
+        name=name,
+        pid=proc.pid,
+        cmd=cmd,
+        started_at=time.time(),
+        log_path=str(log_path),
     )
     state = _load_state()
-    state[name] = {"pid": info.pid, "cmd": info.cmd,
-                   "started_at": info.started_at, "log_path": info.log_path}
+    state[name] = {
+        "pid": info.pid,
+        "cmd": info.cmd,
+        "started_at": info.started_at,
+        "log_path": info.log_path,
+    }
     _save_state(state)
     return info
 
@@ -186,23 +233,38 @@ def start_training(symbol: str, kind: str = "xgboost", classifier: str = "multic
         raise RuntimeError(f"Training already active: {name}")
     log_path = LOGS_DIR / f"train_{symbol}_{kind}.log"
     cmd = [
-        sys.executable, "-m", "scripts.train_symbol",
-        "--symbol", symbol,
-        "--kind", kind,
-        "--classifier", classifier,
+        sys.executable,
+        "-m",
+        "scripts.train_symbol",
+        "--symbol",
+        symbol,
+        "--kind",
+        kind,
+        "--classifier",
+        classifier,
     ]
     log_fh = open(log_path, "a", buffering=1)
     proc = subprocess.Popen(
-        cmd, cwd=ROOT, stdout=log_fh, stderr=subprocess.STDOUT,
+        cmd,
+        cwd=ROOT,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     info = ProcInfo(
-        name=name, pid=proc.pid, cmd=cmd,
-        started_at=time.time(), log_path=str(log_path),
+        name=name,
+        pid=proc.pid,
+        cmd=cmd,
+        started_at=time.time(),
+        log_path=str(log_path),
     )
     state = _load_state()
-    state[name] = {"pid": info.pid, "cmd": info.cmd,
-                   "started_at": info.started_at, "log_path": info.log_path}
+    state[name] = {
+        "pid": info.pid,
+        "cmd": info.cmd,
+        "started_at": info.started_at,
+        "log_path": info.log_path,
+    }
     _save_state(state)
     return info
 
@@ -239,7 +301,7 @@ def tail_log(name: str, lines: int = 100) -> str:
     else:
         # Process gone but log may still exist — try a couple of common names
         if name.startswith("runner:"):
-            log_path = LOGS_DIR / f"runner_{name.split(':',1)[1]}.log"
+            log_path = LOGS_DIR / f"runner_{name.split(':', 1)[1]}.log"
         elif name.startswith("train:"):
             _, sym, kind = name.split(":")
             log_path = LOGS_DIR / f"train_{sym}_{kind}.log"

@@ -28,12 +28,13 @@ from typing import Optional
 # tz data on all platforms; we approximate by detecting DST manually. For our
 # use case (gating evaluations), being off by one hour around DST flips is fine.
 
+
 # DST in the US: second Sunday of March through first Sunday of November.
 def _us_eastern_offset(utc_now: datetime) -> timedelta:
     """Return offset to apply to UTC to get US Eastern time."""
     year = utc_now.year
     # Second Sunday of March
-    dst_start = _nth_weekday(year, 3, 6, 2)        # March, Sunday, 2nd occurrence
+    dst_start = _nth_weekday(year, 3, 6, 2)  # March, Sunday, 2nd occurrence
     # First Sunday of November
     dst_end = _nth_weekday(year, 11, 6, 1)
     # DST window is [dst_start 02:00 ET, dst_end 02:00 ET]
@@ -61,22 +62,23 @@ def to_eastern(utc: datetime) -> datetime:
 
 # ---- regime detection ----
 
+
 class MarketRegime(Enum):
-    OPEN = "open"                       # Mon–Fri 09:30–16:00 ET
-    PRE_OPEN = "pre_open"               # Mon–Fri 00:00–09:30 ET
-    AFTER_CLOSE = "after_close"         # Mon–Fri 16:00–23:59 ET
-    WEEKEND = "weekend"                 # Sat / Sun
+    OPEN = "open"  # Mon–Fri 09:30–16:00 ET
+    PRE_OPEN = "pre_open"  # Mon–Fri 00:00–09:30 ET
+    AFTER_CLOSE = "after_close"  # Mon–Fri 16:00–23:59 ET
+    WEEKEND = "weekend"  # Sat / Sun
 
 
 @dataclass
 class MarketState:
     regime: MarketRegime
     eastern_now: datetime
-    weekday: int                        # 0=Mon..6=Sun
-    is_open: bool                       # convenience
+    weekday: int  # 0=Mon..6=Sun
+    is_open: bool  # convenience
     is_weekend: bool
-    minutes_to_open: Optional[int]      # None if currently open
-    minutes_to_close: Optional[int]     # None if not currently open
+    minutes_to_open: Optional[int]  # None if currently open
+    minutes_to_close: Optional[int]  # None if not currently open
 
 
 _OPEN_TIME = time(9, 30)
@@ -95,8 +97,9 @@ def market_state(now_utc: Optional[datetime] = None) -> MarketState:
         is_open = False
         # Minutes until Monday 09:30 ET
         days_to_monday = 7 - wd
-        next_open = (et.replace(hour=9, minute=30, second=0, microsecond=0)
-                     + timedelta(days=days_to_monday))
+        next_open = et.replace(hour=9, minute=30, second=0, microsecond=0) + timedelta(
+            days=days_to_monday
+        )
         minutes_to_open = int((next_open - et).total_seconds() // 60)
         minutes_to_close = None
     else:
@@ -117,7 +120,7 @@ def market_state(now_utc: Optional[datetime] = None) -> MarketState:
             regime = MarketRegime.AFTER_CLOSE
             is_open = False
             # Minutes until tomorrow 09:30 ET (or Monday if Friday)
-            if wd == 4:                 # Friday after close
+            if wd == 4:  # Friday after close
                 next_open_day = et + timedelta(days=3)
             else:
                 next_open_day = et + timedelta(days=1)
@@ -126,13 +129,18 @@ def market_state(now_utc: Optional[datetime] = None) -> MarketState:
             minutes_to_close = None
 
     return MarketState(
-        regime=regime, eastern_now=et, weekday=wd,
-        is_open=is_open, is_weekend=is_weekend,
-        minutes_to_open=minutes_to_open, minutes_to_close=minutes_to_close,
+        regime=regime,
+        eastern_now=et,
+        weekday=wd,
+        is_open=is_open,
+        is_weekend=is_weekend,
+        minutes_to_open=minutes_to_open,
+        minutes_to_close=minutes_to_close,
     )
 
 
 # ---- gating helpers ----
+
 
 def should_run_entries(state: MarketState) -> bool:
     """Should we look for NEW positions to open (core eval + satellite scans)?
@@ -152,7 +160,8 @@ def should_run_exits(state: MarketState) -> bool:
 
 
 def is_core_rebalance_window(
-    state: MarketState, rebalance_day_of_week: int = 4,
+    state: MarketState,
+    rebalance_day_of_week: int = 4,
 ) -> bool:
     """
     Core sleeve evaluates only on the configured rebalance day, AFTER close.
@@ -160,7 +169,4 @@ def is_core_rebalance_window(
     Default = Friday after 16:00 ET. That way the eval works on the
     just-closed Friday bars, and orders queue for Monday open.
     """
-    return (
-        state.weekday == rebalance_day_of_week
-        and state.regime == MarketRegime.AFTER_CLOSE
-    )
+    return state.weekday == rebalance_day_of_week and state.regime == MarketRegime.AFTER_CLOSE

@@ -37,9 +37,10 @@ _HTTP_TIMEOUT = 30.0
 @dataclass
 class MacroSnapshot:
     """One reading of the macro state, used by core/scoring.py."""
+
     # Yield curve: 10Y - 2Y, percent. Negative = inverted = recession signal.
     yield_curve: float | None
-    yield_curve_trend_60d: float | None     # change vs 60 days ago, percentage points
+    yield_curve_trend_60d: float | None  # change vs 60 days ago, percentage points
 
     # Fed funds rate, percent
     fed_funds: float | None
@@ -47,15 +48,15 @@ class MacroSnapshot:
 
     # VIX level. >25 ~ stressed.
     vix: float | None
-    vix_60d_mean: float | None              # 60-day average
+    vix_60d_mean: float | None  # 60-day average
 
     # Dollar index (DXY). Higher = stronger USD = headwind for commodities/EM.
     dxy: float | None
-    dxy_trend_60d: float | None             # pct change vs 60d ago
+    dxy_trend_60d: float | None  # pct change vs 60d ago
 
     # Credit spread proxy: HYG/LQD ratio. Falling = spreads widening = risk-off.
     credit_ratio: float | None
-    credit_ratio_trend_60d: float | None    # pct change vs 60d ago
+    credit_ratio_trend_60d: float | None  # pct change vs 60d ago
 
     # When this snapshot was assembled
     as_of: datetime
@@ -75,6 +76,7 @@ class MacroFetcher:
 
     def snapshot(self) -> MacroSnapshot:
         """Pull every series and pack into a snapshot. Missing series -> None field."""
+
         def _get_fred(series_key: str) -> pd.Series | None:
             fid = self.cfg.fred_series.get(series_key)
             if not fid:
@@ -138,7 +140,9 @@ class MacroFetcher:
             text = resp.read().decode("utf-8", errors="replace")
         df = pd.read_csv(io.StringIO(text))
         # Columns: 'observation_date' (or 'DATE') and the series id (or 'VALUE')
-        date_col = next((c for c in df.columns if c.lower() in {"date", "observation_date"}), df.columns[0])
+        date_col = next(
+            (c for c in df.columns if c.lower() in {"date", "observation_date"}), df.columns[0]
+        )
         val_col = next((c for c in df.columns if c != date_col), df.columns[-1])
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.dropna(subset=[date_col])
@@ -158,6 +162,7 @@ class MacroFetcher:
         if cached is not None:
             return cached
         import json
+
         period2 = int(time.time())
         period1 = int(time.time() - lookback_days * 86400)
         url = (
@@ -195,6 +200,7 @@ class MacroFetcher:
 
 
 # ---- helpers ----
+
 
 def _last(series: pd.Series | None) -> float | None:
     if series is None or len(series) == 0:

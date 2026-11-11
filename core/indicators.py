@@ -126,7 +126,9 @@ def calculate_linear_regression(df: pd.DataFrame, period: int, std_mult: float) 
     df["LRC_Lower"] = df["LRC_Middle"] - std * std_mult
     df["Dist_to_Upper"] = (df["Close"] - df["LRC_Upper"]) / df["Close"]
     df["LRC_Slope"] = df["Close"].rolling(20).apply(_slope, raw=False)
-    df["LRC_Breakout"] = ((df["Close"] > df["LRC_Upper"]) | (df["Close"] < df["LRC_Lower"])).astype(int)
+    df["LRC_Breakout"] = ((df["Close"] > df["LRC_Upper"]) | (df["Close"] < df["LRC_Lower"])).astype(
+        int
+    )
     return df
 
 

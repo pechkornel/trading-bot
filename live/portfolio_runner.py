@@ -63,9 +63,15 @@ from core.market_hours import (
     should_run_exits,
 )
 from core.sleeves import (
-    CoreCycleResult, CoreDecision, CoreSleeve,
-    Position, SatelliteCycleResult, SatelliteEntry, SatelliteExit,
-    SentimentInput, SentimentSatelliteSleeve,
+    CoreCycleResult,
+    CoreDecision,
+    CoreSleeve,
+    Position,
+    SatelliteCycleResult,
+    SatelliteEntry,
+    SatelliteExit,
+    SentimentInput,
+    SentimentSatelliteSleeve,
 )
 from live.cpgw_keeper import read_session
 from live.notifier import format_trade_alert, send_email
@@ -74,7 +80,10 @@ from live.storage import Storage
 
 class PortfolioRunner:
     def __init__(
-        self, *, dry_run: bool, once: bool,
+        self,
+        *,
+        dry_run: bool,
+        once: bool,
         interval_override: int | None,
     ) -> None:
         self.dry_run = dry_run
@@ -100,8 +109,9 @@ class PortfolioRunner:
             try:
                 self.symbols[sym] = load_symbol(sym)
             except KeyError:
-                self.storage.log_event("warn", "portfolio",
-                    f"{sym}: not in config/symbols.yaml universe, skipping")
+                self.storage.log_event(
+                    "warn", "portfolio", f"{sym}: not in config/symbols.yaml universe, skipping"
+                )
 
         self.client: CPGWClient | None = None
 
@@ -122,15 +132,18 @@ class PortfolioRunner:
     def start(self) -> None:
         total_eq = self.portfolio_cfg.starting_equity
         active = [
-            (name, cfg.allocation_pct) for name, cfg in [
+            (name, cfg.allocation_pct)
+            for name, cfg in [
                 ("core", self.core_cfg),
                 ("sentiment", self.sent_cfg),
                 ("tactical", self.tact_cfg),
-            ] if cfg.enabled
+            ]
+            if cfg.enabled
         ]
-        active_str = " · ".join(
-            f"{name} ${total_eq * pct:,.0f} ({pct:.0%})" for name, pct in active
-        ) or "(none enabled)"
+        active_str = (
+            " · ".join(f"{name} ${total_eq * pct:,.0f} ({pct:.0%})" for name, pct in active)
+            or "(none enabled)"
+        )
         banner = (
             f"PHASE 8 PORTFOLIO · PAPER · port {self.app_cfg.ib.port} · "
             f"{active_str} · cycle={self.interval}s · dry_run={self.dry_run}"
@@ -174,9 +187,10 @@ class PortfolioRunner:
             try:
                 self._cycle()
             except NotAuthenticatedError as e:
-                self.storage.log_event("warn", "portfolio",
-                    f"session expired ({e}); cpgw_keeper should re-login")
-            except Exception as e:                       # noqa: BLE001
+                self.storage.log_event(
+                    "warn", "portfolio", f"session expired ({e}); cpgw_keeper should re-login"
+                )
+            except Exception as e:  # noqa: BLE001
                 self.storage.log_event("error", "portfolio", f"cycle error: {e}")
                 print(f"[portfolio] cycle error: {e}")
             if self.once:
@@ -203,7 +217,9 @@ class PortfolioRunner:
         if ms.regime == MarketRegime.OPEN:
             mkt_note = f"OPEN ({ms.minutes_to_close}m to close, ET {ms.eastern_now:%H:%M %a})"
         elif ms.regime == MarketRegime.WEEKEND:
-            mkt_note = f"WEEKEND (next open in {ms.minutes_to_open // 60}h, ET {ms.eastern_now:%a %H:%M})"
+            mkt_note = (
+                f"WEEKEND (next open in {ms.minutes_to_open // 60}h, ET {ms.eastern_now:%a %H:%M})"
+            )
         elif ms.regime == MarketRegime.PRE_OPEN:
             mkt_note = f"PRE-OPEN ({ms.minutes_to_open}m to open, ET {ms.eastern_now:%H:%M %a})"
         else:
@@ -222,8 +238,9 @@ class PortfolioRunner:
             self._cycle_core(cycle_id, total_equity, ms)
 
         if not (self.core or self.satellite):
-            self.storage.log_event("info", "portfolio",
-                f"cycle={cycle_id} no sleeves enabled — {mkt_note}")
+            self.storage.log_event(
+                "info", "portfolio", f"cycle={cycle_id} no sleeves enabled — {mkt_note}"
+            )
 
     # ---- core sleeve ----
 
@@ -236,9 +253,12 @@ class PortfolioRunner:
         # we have current prices, i.e. only during/after market hours).
         in_rebalance_window = is_core_rebalance_window(ms, self.core_cfg.rebalance_day_of_week)
         if not in_rebalance_window and ms.regime in (MarketRegime.WEEKEND, MarketRegime.PRE_OPEN):
-            self.storage.log_event("info", "core",
+            self.storage.log_event(
+                "info",
+                "core",
                 f"cycle={cycle_id} skip ({ms.regime.value}, next open in "
-                f"{(ms.minutes_to_open or 0)//60}h)")
+                f"{(ms.minutes_to_open or 0) // 60}h)",
+            )
             return
 
         last = self.storage.last_rebalance("core")
@@ -247,7 +267,7 @@ class PortfolioRunner:
         # Snapshot current holdings + latest prices first — needed for the should-evaluate check
         holdings = {r["symbol"]: int(r["shares"]) for r in self.storage.get_holdings("core")}
         latest_prices: dict[str, float] = {}
-        for sym in (set(self.symbols) | set(holdings)):
+        for sym in set(self.symbols) | set(holdings):
             cfg = self.symbols.get(sym)
             if cfg is None:
                 continue
@@ -273,13 +293,17 @@ class PortfolioRunner:
                 closes[sym] = series
 
         if "SPY" not in closes:
-            self.storage.log_event("error", "core",
-                f"cycle={cycle_id}: no SPY history — can't run risk-off filter, bailing")
+            self.storage.log_event(
+                "error",
+                "core",
+                f"cycle={cycle_id}: no SPY history — can't run risk-off filter, bailing",
+            )
             return
 
         macro = self.macro_fetcher.snapshot()
         self.storage.log_event(
-            "info", "core",
+            "info",
+            "core",
             f"cycle={cycle_id} macro: vix={macro.vix} yc={macro.yield_curve} "
             f"dxy={macro.dxy} complete={macro.complete}",
         )
@@ -295,7 +319,9 @@ class PortfolioRunner:
         # Log every decision so the dashboard shows the full ranking
         for dec in result.decisions:
             self.storage.log_target(
-                cycle_id=cycle_id, sleeve="core", symbol=dec.symbol,
+                cycle_id=cycle_id,
+                sleeve="core",
+                symbol=dec.symbol,
                 prediction=None,
                 confidence=dec.score.composite if dec.score else None,
                 sentiment_score=None,
@@ -313,11 +339,14 @@ class PortfolioRunner:
             )
 
         self.storage.log_rebalance(
-            sleeve="core", reason=why,
+            sleeve="core",
+            reason=why,
             equity_before=sleeve_equity,
             notes=(
                 f"risk_off={result.risk_off} | "
-                + ", ".join(f"{d.symbol} {d.delta_shares:+d}" for d in result.decisions if d.delta_shares)
+                + ", ".join(
+                    f"{d.symbol} {d.delta_shares:+d}" for d in result.decisions if d.delta_shares
+                )
             ),
         )
 
@@ -335,8 +364,10 @@ class PortfolioRunner:
                 continue
             action = "BUY " if d.delta_shares > 0 else "SELL"
             qty = abs(d.delta_shares)
-            print(f"    {d.symbol}: {action} {qty} → {d.target_shares} sh "
-                  f"({d.target_weight:.1%}, ${d.target_value:,.0f})")
+            print(
+                f"    {d.symbol}: {action} {qty} → {d.target_shares} sh "
+                f"({d.target_weight:.1%}, ${d.target_value:,.0f})"
+            )
             self._execute_core_leg(d, cycle_id)
 
     def _execute_core_leg(self, d: CoreDecision, cycle_id: str) -> None:
@@ -348,15 +379,23 @@ class PortfolioRunner:
 
         if self.dry_run:
             self.storage.log_order(
-                sleeve="core", symbol=d.symbol, action=action,
-                quantity=qty, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=None, tp_id=None, stop_id=None,
-                dry_run=True, status="logged",
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=None,
+                tp_id=None,
+                stop_id=None,
+                dry_run=True,
+                status="logged",
                 note=f"rebalance cycle={cycle_id}",
             )
             self.storage.upsert_holding(
-                sleeve="core", symbol=d.symbol,
+                sleeve="core",
+                symbol=d.symbol,
                 shares=float(d.target_shares),
                 avg_cost=d.close_price,
             )
@@ -365,7 +404,11 @@ class PortfolioRunner:
         assert self.client is not None
         conid = self.client.conid_for_stock(d.symbol)
         order = self.client.build_limit_order(
-            conid=conid, side=action, quantity=qty, price=entry, tif="DAY",
+            conid=conid,
+            side=action,
+            quantity=qty,
+            price=entry,
+            tif="DAY",
         )
         try:
             tickets = self.client.place_orders([order])
@@ -373,27 +416,42 @@ class PortfolioRunner:
             order_id_str = ticket.order_id if ticket else None
             parent_int = int(order_id_str) if order_id_str and order_id_str.isdigit() else None
             self.storage.log_order(
-                sleeve="core", symbol=d.symbol, action=action,
-                quantity=qty, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=parent_int, tp_id=None, stop_id=None,
-                dry_run=False, status="placed",
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=parent_int,
+                tp_id=None,
+                stop_id=None,
+                dry_run=False,
+                status="placed",
                 note=f"rebalance cycle={cycle_id} cpgw_id={order_id_str}",
             )
             self.storage.upsert_holding(
-                sleeve="core", symbol=d.symbol,
+                sleeve="core",
+                symbol=d.symbol,
                 shares=float(d.target_shares),
                 avg_cost=d.close_price,
             )
-        except Exception as e:                           # noqa: BLE001
-            self.storage.log_event("error", "core",
-                f"order failed for {d.symbol}: {e}")
+        except Exception as e:  # noqa: BLE001
+            self.storage.log_event("error", "core", f"order failed for {d.symbol}: {e}")
             self.storage.log_order(
-                sleeve="core", symbol=d.symbol, action=action,
-                quantity=qty, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=None, tp_id=None, stop_id=None,
-                dry_run=False, status="failed", note=str(e),
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=None,
+                tp_id=None,
+                stop_id=None,
+                dry_run=False,
+                status="failed",
+                note=str(e),
             )
 
     # ---- sentiment satellite ----
@@ -410,13 +468,16 @@ class PortfolioRunner:
         for r in positions_raw:
             opened = datetime.fromisoformat(r["opened_at"])
             positions[r["symbol"]] = Position(
-                symbol=r["symbol"], shares=int(r["shares"]),
-                entry_price=float(r["avg_cost"]), opened_at=opened,
+                symbol=r["symbol"],
+                shares=int(r["shares"]),
+                entry_price=float(r["avg_cost"]),
+                opened_at=opened,
             )
 
         # Pull latest sentiment for each universe symbol (from SQLite, NOT API)
         sent_rows = self.storage.latest_sentiment_batch(
-            self.sent_cfg.universe, max_age_sec=self.sentiment_cfg.staleness_sec,
+            self.sent_cfg.universe,
+            max_age_sec=self.sentiment_cfg.staleness_sec,
         )
 
         # Pull current prices for held positions + every candidate symbol
@@ -431,40 +492,50 @@ class PortfolioRunner:
                 continue
             row = sent_rows.get(sym)
             inputs[sym] = SentimentInput(
-                symbol=sym, price=price,
+                symbol=sym,
+                price=price,
                 sentiment_score=float(row["score"]) if row else None,
                 article_count=int(row.get("article_count") or 0) if row else 0,
                 sentiment_ts=datetime.fromisoformat(row["ts"]) if row else None,
             )
 
         result = self.satellite.evaluate(
-            inputs=inputs, positions=positions, sleeve_equity=sleeve_equity,
-            allow_entries=allow_entries, allow_exits=allow_exits,
+            inputs=inputs,
+            positions=positions,
+            sleeve_equity=sleeve_equity,
+            allow_entries=allow_entries,
+            allow_exits=allow_exits,
         )
 
         # Log every decision (entries + exits + skips) so the dashboard tells the full story
         for e in result.entries:
             self.storage.log_target(
-                cycle_id=cycle_id, sleeve="sentiment", symbol=e.symbol,
+                cycle_id=cycle_id,
+                sleeve="sentiment",
+                symbol=e.symbol,
                 prediction=None,
                 confidence=None,
-                sentiment_score=(inputs[e.symbol].sentiment_score
-                                 if e.symbol in inputs else None),
-                close_price=e.price, realized_vol=None,
-                signal_weight=None, vol_scale=None,
+                sentiment_score=(inputs[e.symbol].sentiment_score if e.symbol in inputs else None),
+                close_price=e.price,
+                realized_vol=None,
+                signal_weight=None,
+                vol_scale=None,
                 target_shares=e.shares,
                 position_value=e.target_value,
                 reason=e.reason,
             )
         for x in result.exits:
             self.storage.log_target(
-                cycle_id=cycle_id, sleeve="sentiment", symbol=x.symbol,
+                cycle_id=cycle_id,
+                sleeve="sentiment",
+                symbol=x.symbol,
                 prediction=None,
                 confidence=None,
-                sentiment_score=(inputs[x.symbol].sentiment_score
-                                 if x.symbol in inputs else None),
-                close_price=x.price, realized_vol=None,
-                signal_weight=None, vol_scale=None,
+                sentiment_score=(inputs[x.symbol].sentiment_score if x.symbol in inputs else None),
+                close_price=x.price,
+                realized_vol=None,
+                signal_weight=None,
+                vol_scale=None,
                 target_shares=0,
                 position_value=0,
                 reason=f"EXIT: {x.reason}",
@@ -474,9 +545,11 @@ class PortfolioRunner:
 
         # Pretty-print
         if result.entries or result.exits:
-            print(f"[cycle {cycle_id} sentiment] entries={len(result.entries)} "
-                  f"exits={len(result.exits)} skipped={len(result.skipped)} "
-                  f"(entries_allowed={allow_entries})")
+            print(
+                f"[cycle {cycle_id} sentiment] entries={len(result.entries)} "
+                f"exits={len(result.exits)} skipped={len(result.skipped)} "
+                f"(entries_allowed={allow_entries})"
+            )
             for e in result.entries:
                 print(f"  → ENTER {e.symbol} ×{e.shares} @ {e.price:.2f}  {e.reason}")
             for x in result.exits:
@@ -488,70 +561,114 @@ class PortfolioRunner:
         # Process exits first to free up cash + slots
         for x in result.exits:
             self._exec_satellite_leg(
-                symbol=x.symbol, action="SELL", quantity=x.shares,
-                price=x.price, note=f"satellite exit: {x.reason} cycle={cycle_id}",
+                symbol=x.symbol,
+                action="SELL",
+                quantity=x.shares,
+                price=x.price,
+                note=f"satellite exit: {x.reason} cycle={cycle_id}",
                 drop_holding=True,
             )
         for e in result.entries:
             self._exec_satellite_leg(
-                symbol=e.symbol, action="BUY", quantity=e.shares,
-                price=e.price, note=f"satellite entry: {e.reason} cycle={cycle_id}",
+                symbol=e.symbol,
+                action="BUY",
+                quantity=e.shares,
+                price=e.price,
+                note=f"satellite entry: {e.reason} cycle={cycle_id}",
                 drop_holding=False,
             )
 
     def _exec_satellite_leg(
-        self, *, symbol: str, action: str, quantity: int,
-        price: float, note: str, drop_holding: bool,
+        self,
+        *,
+        symbol: str,
+        action: str,
+        quantity: int,
+        price: float,
+        note: str,
+        drop_holding: bool,
     ) -> None:
         assert self.client is not None
         entry = round(price * (1.0005 if action == "BUY" else 0.9995), 2)
         if self.dry_run:
             self.storage.log_order(
-                sleeve="sentiment", symbol=symbol, action=action,
-                quantity=quantity, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=None, tp_id=None, stop_id=None,
-                dry_run=True, status="logged", note=note,
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=None,
+                tp_id=None,
+                stop_id=None,
+                dry_run=True,
+                status="logged",
+                note=note,
             )
             if drop_holding:
                 self.storage.delete_holding(sleeve="sentiment", symbol=symbol)
             else:
                 self.storage.upsert_holding(
-                    sleeve="sentiment", symbol=symbol,
-                    shares=float(quantity), avg_cost=price,
+                    sleeve="sentiment",
+                    symbol=symbol,
+                    shares=float(quantity),
+                    avg_cost=price,
                 )
             return
         try:
             conid = self.client.conid_for_stock(symbol)
             order = self.client.build_limit_order(
-                conid=conid, side=action, quantity=quantity, price=entry, tif="DAY",
+                conid=conid,
+                side=action,
+                quantity=quantity,
+                price=entry,
+                tif="DAY",
             )
             tickets = self.client.place_orders([order])
             ticket = tickets[0] if tickets else None
             order_id_str = ticket.order_id if ticket else None
             parent_int = int(order_id_str) if order_id_str and order_id_str.isdigit() else None
             self.storage.log_order(
-                sleeve="sentiment", symbol=symbol, action=action,
-                quantity=quantity, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=parent_int, tp_id=None, stop_id=None,
-                dry_run=False, status="placed", note=note,
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=parent_int,
+                tp_id=None,
+                stop_id=None,
+                dry_run=False,
+                status="placed",
+                note=note,
             )
             if drop_holding:
                 self.storage.delete_holding(sleeve="sentiment", symbol=symbol)
             else:
                 self.storage.upsert_holding(
-                    sleeve="sentiment", symbol=symbol,
-                    shares=float(quantity), avg_cost=price,
+                    sleeve="sentiment",
+                    symbol=symbol,
+                    shares=float(quantity),
+                    avg_cost=price,
                 )
-        except Exception as e:                       # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             self.storage.log_event("error", "sentiment", f"{symbol} {action} failed: {e}")
             self.storage.log_order(
-                sleeve="sentiment", symbol=symbol, action=action,
-                quantity=quantity, entry_price=entry,
-                tp_price=None, stop_price=None,
-                parent_id=None, tp_id=None, stop_id=None,
-                dry_run=False, status="failed", note=str(e),
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                entry_price=entry,
+                tp_price=None,
+                stop_price=None,
+                parent_id=None,
+                tp_id=None,
+                stop_id=None,
+                dry_run=False,
+                status="failed",
+                note=str(e),
             )
 
     # ---- price fetching helpers ----
@@ -561,11 +678,14 @@ class PortfolioRunner:
         assert self.client is not None
         try:
             raw = self.client.get_historical_data(
-                symbol, bar=cfg.bar_size, period=cfg.history_duration,
+                symbol,
+                bar=cfg.bar_size,
+                period=cfg.history_duration,
             )
-        except Exception as e:                           # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             self.storage.log_event(
-                "warn", "core",
+                "warn",
+                "core",
                 f"{symbol}: latest-close fetch failed ({cfg.bar_size}/{cfg.history_duration}): {e}",
             )
             return None
@@ -579,11 +699,14 @@ class PortfolioRunner:
         assert self.client is not None
         try:
             raw = self.client.get_historical_data(
-                symbol, bar=cfg.bar_size, period=cfg.history_duration,
+                symbol,
+                bar=cfg.bar_size,
+                period=cfg.history_duration,
             )
-        except Exception as e:                           # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             self.storage.log_event(
-                "warn", "core",
+                "warn",
+                "core",
                 f"{symbol}: close-series fetch failed: {e}",
             )
             return None
@@ -595,21 +718,21 @@ class PortfolioRunner:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Multi-sleeve portfolio runner (Phase 8).")
-    p.add_argument("--interval", type=int, default=None,
-                   help="Override cycle interval seconds")
-    p.add_argument("--once", action="store_true",
-                   help="Run one cycle then exit (testing)")
+    p.add_argument("--interval", type=int, default=None, help="Override cycle interval seconds")
+    p.add_argument("--once", action="store_true", help="Run one cycle then exit (testing)")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
-    mode.add_argument("--live", dest="dry_run", action="store_false",
-                      help="Send orders to the IB paper account")
+    mode.add_argument(
+        "--live", dest="dry_run", action="store_false", help="Send orders to the IB paper account"
+    )
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     runner = PortfolioRunner(
-        dry_run=args.dry_run, once=args.once,
+        dry_run=args.dry_run,
+        once=args.once,
         interval_override=args.interval,
     )
     runner.start()

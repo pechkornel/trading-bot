@@ -84,15 +84,15 @@ class Keeper:
 
     TICKLE_INTERVAL_SEC = 60
     AUTH_RECHECK_INTERVAL_SEC = 300
-    REAUTH_BACKOFF_SEC = 30           # wait before retrying after a hard failure
+    REAUTH_BACKOFF_SEC = 30  # wait before retrying after a hard failure
 
     def __init__(self, *, once: bool) -> None:
         self.once = once
         self.stopped = False
 
         app_cfg = load_app_config()
-        assert_paper_mode(app_cfg)              # hard paper-only lock, same as everywhere else
-        self.cpgw_port = app_cfg.ib.port        # reuse existing config field; defaults to 5000 in Phase 7
+        assert_paper_mode(app_cfg)  # hard paper-only lock, same as everywhere else
+        self.cpgw_port = app_cfg.ib.port  # reuse existing config field; defaults to 5000 in Phase 7
         self.creds = _read_credentials()
 
         self.storage = Storage()
@@ -130,14 +130,16 @@ class Keeper:
                     self.client.account_id = session["account_id"]
                 acct = session.get("account_id")
                 self.storage.log_event(
-                    "info", "cpgw_keeper",
+                    "info",
+                    "cpgw_keeper",
                     f"resumed existing session (account={acct}); skipped SRP",
                 )
                 print(f"[cpgw_keeper] resumed existing session — account={acct}")
                 return True
-        except Exception as e:                       # noqa: BLE001
-            self.storage.log_event("info", "cpgw_keeper",
-                f"cannot resume saved session ({e}); doing fresh SRP")
+        except Exception as e:  # noqa: BLE001
+            self.storage.log_event(
+                "info", "cpgw_keeper", f"cannot resume saved session ({e}); doing fresh SRP"
+            )
         return False
 
     def _on_signal(self, *_: Any) -> None:
@@ -148,7 +150,7 @@ class Keeper:
             t = time.time()
             try:
                 self._tick()
-            except Exception as e:                # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 self.storage.log_event("error", "cpgw_keeper", f"tick error: {e}")
                 print(f"[cpgw_keeper] tick error: {e}")
             if self.once:
@@ -173,15 +175,15 @@ class Keeper:
             # Dispatcher conflict risk. If ssodh_init itself fails, we leave
             # the session alone; the dashboard surfaces the persistent state.
             self.storage.log_event(
-                "info", "cpgw_keeper",
+                "info",
+                "cpgw_keeper",
                 f"tickle: authenticated={authenticated} connected={connected}; "
                 "nudging with ssodh_init",
             )
             try:
                 self.client.ssodh_init()
-            except Exception as e:                   # noqa: BLE001
-                self.storage.log_event("warn", "cpgw_keeper",
-                    f"ssodh_init nudge failed: {e}")
+            except Exception as e:  # noqa: BLE001
+                self.storage.log_event("warn", "cpgw_keeper", f"ssodh_init nudge failed: {e}")
             return
 
         # Periodic deep auth check (every AUTH_RECHECK_INTERVAL_SEC). If
@@ -192,23 +194,23 @@ class Keeper:
                 deep = self.client.auth_status()
                 self.last_auth_check = time.time()
                 if not deep.get("authenticated"):
-                    self.storage.log_event("warn", "cpgw_keeper",
-                        f"auth/status: {deep}; nudging ssodh_init")
+                    self.storage.log_event(
+                        "warn", "cpgw_keeper", f"auth/status: {deep}; nudging ssodh_init"
+                    )
                     try:
                         self.client.ssodh_init()
-                    except Exception as e:           # noqa: BLE001
-                        self.storage.log_event("warn", "cpgw_keeper",
-                            f"deep ssodh_init nudge failed: {e}")
-            except Exception as e:                   # noqa: BLE001
-                self.storage.log_event("warn", "cpgw_keeper",
-                    f"deep auth_status check failed: {e}")
+                    except Exception as e:  # noqa: BLE001
+                        self.storage.log_event(
+                            "warn", "cpgw_keeper", f"deep ssodh_init nudge failed: {e}"
+                        )
+            except Exception as e:  # noqa: BLE001
+                self.storage.log_event("warn", "cpgw_keeper", f"deep auth_status check failed: {e}")
 
     def _full_login(self) -> None:
         try:
             cookie = login(self.creds, port=self.cpgw_port)
         except MaxLoginAttempts as e:
-            self.storage.log_event("error", "cpgw_keeper",
-                f"max login attempts hit — bailing: {e}")
+            self.storage.log_event("error", "cpgw_keeper", f"max login attempts hit — bailing: {e}")
             raise
         except IBKRAuthError as e:
             self.storage.log_event("error", "cpgw_keeper", f"login failed: {e}")
@@ -223,18 +225,21 @@ class Keeper:
         # First call after fresh SSO login — brings up the brokerage session.
         try:
             self.client.ssodh_init()
-        except Exception as e:                    # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             self.storage.log_event("warn", "cpgw_keeper", f"ssodh_init warning: {e}")
 
         try:
             acct = self.client.bootstrap()
-        except Exception as e:                    # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             acct = None
             self.storage.log_event("warn", "cpgw_keeper", f"account bootstrap warning: {e}")
 
         _write_session(cookie, acct)
-        self.storage.log_event("info", "cpgw_keeper",
-            f"login OK — account={acct} session written to {SESSION_FILE.name}")
+        self.storage.log_event(
+            "info",
+            "cpgw_keeper",
+            f"login OK — account={acct} session written to {SESSION_FILE.name}",
+        )
         print(f"[cpgw_keeper] login OK — account={acct}")
 
     def stop(self) -> None:
@@ -245,8 +250,11 @@ class Keeper:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="CPGW session keeper (Phase 7).")
-    p.add_argument("--once", action="store_true",
-                   help="One login + status check, then exit (useful for testing)")
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="One login + status check, then exit (useful for testing)",
+    )
     return p.parse_args(argv)
 
 
