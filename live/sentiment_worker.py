@@ -78,25 +78,24 @@ class SentimentWorker:
         readings = self.provider.fetch_batch(self.cfg.symbols)
         for r in readings:
             self.storage.log_sentiment(
-                symbol=r.symbol, source=r.source,
-                score=r.score, confidence=r.confidence,
-                article_count=r.article_count, raw_json=r.raw_json,
+                symbol=r.symbol,
+                source=r.source,
+                score=r.score,
+                confidence=r.confidence,
+                article_count=r.article_count,
+                raw_json=r.raw_json,
             )
-        line = "  ".join(
-            f"{r.symbol}={r.score:+.2f}({r.article_count})"
-            for r in readings
-        )
+        line = "  ".join(f"{r.symbol}={r.score:+.2f}({r.article_count})" for r in readings)
         print(f"[sentiment] {line}")
-        self.storage.log_event("info", "sentiment",
-            f"fetched {len(readings)} readings from {self.provider.name}")
+        self.storage.log_event(
+            "info", "sentiment", f"fetched {len(readings)} readings from {self.provider.name}"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Sentiment polling worker.")
-    p.add_argument("--interval", type=int, default=None,
-                   help="Override poll interval (seconds)")
-    p.add_argument("--once", action="store_true",
-                   help="One fetch then exit (testing)")
+    p.add_argument("--interval", type=int, default=None, help="Override poll interval (seconds)")
+    p.add_argument("--once", action="store_true", help="One fetch then exit (testing)")
     return p.parse_args(argv)
 
 

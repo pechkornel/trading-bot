@@ -175,8 +175,13 @@ class Storage:
                 "INSERT INTO predictions (ts, symbol, model, prediction, confidence, "
                 "close_price, atr, features_json) VALUES (?,?,?,?,?,?,?,?)",
                 (
-                    _now(), symbol, model, int(prediction), float(confidence),
-                    close_price, atr,
+                    _now(),
+                    symbol,
+                    model,
+                    int(prediction),
+                    float(confidence),
+                    close_price,
+                    atr,
                     json.dumps(features, default=float) if features else None,
                 ),
             )
@@ -205,14 +210,27 @@ class Storage:
                 "tp_price, stop_price, parent_id, tp_id, stop_id, dry_run, status, note) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    _now(), sleeve, symbol, action, float(quantity), float(entry_price),
-                    tp_price, stop_price, parent_id, tp_id, stop_id,
-                    int(bool(dry_run)), status, note,
+                    _now(),
+                    sleeve,
+                    symbol,
+                    action,
+                    float(quantity),
+                    float(entry_price),
+                    tp_price,
+                    stop_price,
+                    parent_id,
+                    tp_id,
+                    stop_id,
+                    int(bool(dry_run)),
+                    status,
+                    note,
                 ),
             )
             return cur.lastrowid
 
-    def log_equity(self, equity: float, cash: float | None = None, positions: float | None = None) -> None:
+    def log_equity(
+        self, equity: float, cash: float | None = None, positions: float | None = None
+    ) -> None:
         with self._conn() as c:
             c.execute(
                 "INSERT INTO equity (ts, equity, cash, positions) VALUES (?,?,?,?)",
@@ -243,16 +261,32 @@ class Storage:
                 "target_shares, position_value, reason) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    cycle_id, _now(), sleeve, symbol, prediction, confidence,
-                    sentiment_score, close_price, realized_vol, signal_weight, vol_scale,
-                    int(target_shares), position_value, reason,
+                    cycle_id,
+                    _now(),
+                    sleeve,
+                    symbol,
+                    prediction,
+                    confidence,
+                    sentiment_score,
+                    close_price,
+                    realized_vol,
+                    signal_weight,
+                    vol_scale,
+                    int(target_shares),
+                    position_value,
+                    reason,
                 ),
             )
             return cur.lastrowid
 
     def log_sentiment(
-        self, *, symbol: str, source: str, score: float,
-        confidence: float | None = None, article_count: int | None = None,
+        self,
+        *,
+        symbol: str,
+        source: str,
+        score: float,
+        confidence: float | None = None,
+        article_count: int | None = None,
         raw_json: str | None = None,
     ) -> int:
         with self._conn() as c:
@@ -265,11 +299,10 @@ class Storage:
 
     def latest_sentiment(self, symbol: str, max_age_sec: int) -> dict[str, Any] | None:
         """Return the most recent sentiment row for symbol if it's fresher than max_age_sec."""
-        cutoff_iso = (datetime.now(timezone.utc).timestamp() - max_age_sec)
+        cutoff_iso = datetime.now(timezone.utc).timestamp() - max_age_sec
         with self._conn() as c:
             row = c.execute(
-                "SELECT * FROM sentiment WHERE symbol = ? "
-                "ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM sentiment WHERE symbol = ? ORDER BY id DESC LIMIT 1",
                 (symbol,),
             ).fetchone()
         if row is None:
@@ -281,9 +314,12 @@ class Storage:
 
     def get_holdings(self, sleeve: str) -> list[dict[str, Any]]:
         with self._conn() as c:
-            return [dict(r) for r in c.execute(
-                "SELECT * FROM holdings WHERE sleeve = ? ORDER BY symbol", (sleeve,)
-            ).fetchall()]
+            return [
+                dict(r)
+                for r in c.execute(
+                    "SELECT * FROM holdings WHERE sleeve = ? ORDER BY symbol", (sleeve,)
+                ).fetchall()
+            ]
 
     def delete_holding(self, *, sleeve: str, symbol: str) -> None:
         """Used by the satellite sleeve when it exits a position."""
@@ -294,7 +330,9 @@ class Storage:
             )
 
     def latest_sentiment_batch(
-        self, symbols: list[str], max_age_sec: int,
+        self,
+        symbols: list[str],
+        max_age_sec: int,
     ) -> dict[str, dict[str, Any]]:
         """One latest-fresh-sentiment-row per symbol. Empty if none fresh enough."""
         out: dict[str, dict[str, Any]] = {}
@@ -305,7 +343,12 @@ class Storage:
         return out
 
     def upsert_holding(
-        self, *, sleeve: str, symbol: str, shares: float, avg_cost: float,
+        self,
+        *,
+        sleeve: str,
+        symbol: str,
+        shares: float,
+        avg_cost: float,
     ) -> None:
         with self._conn() as c:
             existing = c.execute(
@@ -314,8 +357,7 @@ class Storage:
             ).fetchone()
             if existing:
                 c.execute(
-                    "UPDATE holdings SET shares=?, avg_cost=?, last_update=? "
-                    "WHERE id=?",
+                    "UPDATE holdings SET shares=?, avg_cost=?, last_update=? WHERE id=?",
                     (shares, avg_cost, _now(), existing["id"]),
                 )
             else:
@@ -325,9 +367,14 @@ class Storage:
                     (sleeve, symbol, shares, avg_cost, _now(), _now()),
                 )
 
-    def log_rebalance(self, *, sleeve: str, reason: str,
-                      equity_before: float | None = None,
-                      notes: str | None = None) -> int:
+    def log_rebalance(
+        self,
+        *,
+        sleeve: str,
+        reason: str,
+        equity_before: float | None = None,
+        notes: str | None = None,
+    ) -> int:
         with self._conn() as c:
             cur = c.execute(
                 "INSERT INTO rebalances (ts, sleeve, reason, equity_before, notes) "
@@ -358,11 +405,13 @@ class Storage:
                     "SELECT * FROM targets WHERE cycle_id = ? ORDER BY symbol",
                     (row["cycle_id"],),
                 ).fetchall()
-                out.append({
-                    "cycle_id": row["cycle_id"],
-                    "ts": row["ts"],
-                    "targets": [dict(r) for r in rows],
-                })
+                out.append(
+                    {
+                        "cycle_id": row["cycle_id"],
+                        "ts": row["ts"],
+                        "targets": [dict(r) for r in rows],
+                    }
+                )
             return out
 
     def log_event(self, level: str, source: str, message: str) -> None:
@@ -374,7 +423,9 @@ class Storage:
 
     # --- reads (used by the dashboard later) ---
 
-    def recent_predictions(self, limit: int = 50, symbol: str | None = None) -> list[dict[str, Any]]:
+    def recent_predictions(
+        self, limit: int = 50, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
         q = "SELECT * FROM predictions"
         args: tuple = ()
         if symbol:
@@ -388,7 +439,8 @@ class Storage:
     def recent_orders(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._conn() as c:
             return [
-                dict(r) for r in c.execute(
+                dict(r)
+                for r in c.execute(
                     "SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)
                 ).fetchall()
             ]
@@ -396,7 +448,8 @@ class Storage:
     def recent_events(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._conn() as c:
             return [
-                dict(r) for r in c.execute(
+                dict(r)
+                for r in c.execute(
                     "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
                 ).fetchall()
             ]
@@ -404,7 +457,8 @@ class Storage:
     def equity_history(self, limit: int = 1000) -> list[dict[str, Any]]:
         with self._conn() as c:
             return [
-                dict(r) for r in c.execute(
+                dict(r)
+                for r in c.execute(
                     "SELECT * FROM equity ORDER BY id DESC LIMIT ?", (limit,)
                 ).fetchall()
             ]

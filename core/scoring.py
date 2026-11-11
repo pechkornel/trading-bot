@@ -42,39 +42,40 @@ from core.macro import MacroSnapshot
 # macro_alignment scoring rules.
 
 ASSET_BUCKET: dict[str, str] = {
-    "SPY":  "equity_us_large",
-    "IWM":  "equity_us_small",
-    "EFA":  "equity_intl_dev",
-    "VWO":  "equity_intl_em",
-    "QQQ":  "equity_us_large",        # treated like SPY for macro purposes
-    "TLT":  "bond_long",
-    "IEF":  "bond_inter",
-    "AGG":  "bond_broad",
-    "GLD":  "alt_gold",
-    "DBC":  "alt_commodity",
-    "BIL":  "cash",
+    "SPY": "equity_us_large",
+    "IWM": "equity_us_small",
+    "EFA": "equity_intl_dev",
+    "VWO": "equity_intl_em",
+    "QQQ": "equity_us_large",  # treated like SPY for macro purposes
+    "TLT": "bond_long",
+    "IEF": "bond_inter",
+    "AGG": "bond_broad",
+    "GLD": "alt_gold",
+    "DBC": "alt_commodity",
+    "BIL": "cash",
 }
 
 
 @dataclass
 class AssetScore:
     symbol: str
-    momentum: float          # [-1, 1]
-    macro: float             # [-1, 1]
-    trend: float             # [-1, 1]
-    composite: float         # weighted sum
+    momentum: float  # [-1, 1]
+    macro: float  # [-1, 1]
+    trend: float  # [-1, 1]
+    composite: float  # weighted sum
     bucket: str
-    reason: str              # human-readable breakdown
+    reason: str  # human-readable breakdown
 
 
 @dataclass
 class ScoringResult:
     scores: list[AssetScore]
-    risk_off: bool           # True if hard risk-off filter triggered
+    risk_off: bool  # True if hard risk-off filter triggered
     risk_off_reason: str | None
 
 
 # ---- public API ----
+
 
 def score_universe(
     closes: Mapping[str, pd.Series],
@@ -127,10 +128,17 @@ def score_universe(
             f"trend={trend_score:+.2f}×{cfg.trend_weight} "
             f"= {composite:+.3f}"
         )
-        out.append(AssetScore(
-            symbol=sym, momentum=mom, macro=macro_score, trend=trend_score,
-            composite=composite, bucket=bucket, reason=reason,
-        ))
+        out.append(
+            AssetScore(
+                symbol=sym,
+                momentum=mom,
+                macro=macro_score,
+                trend=trend_score,
+                composite=composite,
+                bucket=bucket,
+                reason=reason,
+            )
+        )
 
     out.sort(key=lambda s: s.composite, reverse=True)
     return ScoringResult(scores=out, risk_off=risk_off, risk_off_reason=risk_off_reason)
@@ -156,6 +164,7 @@ def select_holdings(result: ScoringResult, cfg: CoreSleeveConfig) -> dict[str, f
 
 # ---- macro alignment rules ----
 
+
 def _macro_score(bucket: str, m: MacroSnapshot) -> float:
     """
     Per-bucket macro alignment in [-1, 1].
@@ -174,9 +183,9 @@ def _macro_score(bucket: str, m: MacroSnapshot) -> float:
     # Yield curve: positive (steepening) favors equities + commodities; inverted favors long bonds
     if m.yield_curve is not None:
         if bucket.startswith("equity") or bucket.startswith("alt_commodity"):
-            score += _norm(m.yield_curve, -1.0, 2.0)          # -1 inverted, +1 steep
+            score += _norm(m.yield_curve, -1.0, 2.0)  # -1 inverted, +1 steep
         elif bucket == "bond_long":
-            score += _norm(-m.yield_curve, -1.0, 2.0)         # inversion = bond bid
+            score += _norm(-m.yield_curve, -1.0, 2.0)  # inversion = bond bid
         components += 1
 
     # VIX: high VIX favors bonds, gold, cash; hurts equity
@@ -191,20 +200,20 @@ def _macro_score(bucket: str, m: MacroSnapshot) -> float:
 
     # Dollar (DXY) trend: weak dollar favors commodities + EM, hurts US large
     if m.dxy_trend_60d is not None:
-        dxy_sig = _clip(m.dxy_trend_60d * 10.0)               # 10% move → full signal
+        dxy_sig = _clip(m.dxy_trend_60d * 10.0)  # 10% move → full signal
         if bucket in ("alt_commodity", "alt_gold", "equity_intl_em", "equity_intl_dev"):
-            score += -dxy_sig                                  # weak dollar good
+            score += -dxy_sig  # weak dollar good
         elif bucket == "equity_us_large":
-            score += dxy_sig                                   # strong dollar OK for USD-earners
+            score += dxy_sig  # strong dollar OK for USD-earners
         components += 1
 
     # Credit spreads (HYG/LQD ratio falling = risk-off)
     if m.credit_ratio_trend_60d is not None:
         credit_sig = _clip(m.credit_ratio_trend_60d * 10.0)
         if bucket.startswith("equity"):
-            score += credit_sig                                # widening spreads bad for stocks
+            score += credit_sig  # widening spreads bad for stocks
         elif bucket.startswith("bond_"):
-            score += -credit_sig * 0.5                         # mild flight-to-safety bid
+            score += -credit_sig * 0.5  # mild flight-to-safety bid
         components += 1
 
     if components == 0:
@@ -213,6 +222,7 @@ def _macro_score(bucket: str, m: MacroSnapshot) -> float:
 
 
 # ---- trend score (price vs MA) ----
+
 
 def _trend_score(closes: pd.Series | None, ma_days: int) -> float:
     """+1 if comfortably above 200d MA, -1 if comfortably below."""
@@ -227,6 +237,7 @@ def _trend_score(closes: pd.Series | None, ma_days: int) -> float:
 
 
 # ---- risk-off filter ----
+
 
 def _check_risk_off(
     closes: Mapping[str, pd.Series],
@@ -255,6 +266,7 @@ def _check_risk_off(
 
 # ---- numerical helpers ----
 
+
 def _clip(x: float) -> float:
     return max(-1.0, min(1.0, x))
 
@@ -273,7 +285,7 @@ def _rank_to_signed(values: dict[str, float | None]) -> dict[str, float]:
         return {k: 0.0 for k in values}
     series = pd.Series(valid).rank(method="average")
     n = len(series)
-    signed = 2 * (series - 1) / (n - 1) - 1     # ranks 1..n → -1..+1
+    signed = 2 * (series - 1) / (n - 1) - 1  # ranks 1..n → -1..+1
     out = {k: 0.0 for k in values}
     for k, v in signed.items():
         out[k] = float(v)

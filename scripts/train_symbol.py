@@ -33,12 +33,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train a model for one symbol and register it.")
     p.add_argument("--symbol", required=True)
     p.add_argument("--kind", choices=["xgboost", "lstm"], default="xgboost")
-    p.add_argument("--classifier", choices=["binary", "multiclass"], default="multiclass",
-                   help="(xgboost only)")
+    p.add_argument(
+        "--classifier",
+        choices=["binary", "multiclass"],
+        default="multiclass",
+        help="(xgboost only)",
+    )
     p.add_argument("--no-smote", action="store_true", help="(xgboost only) disable SMOTE")
     p.add_argument("--name", default=None, help="Registry name (default <symbol>_<tf>_<kind>)")
-    p.add_argument("--feature-set", default=None,
-                   help="Override feature set (full / indicators_only / ohlcv)")
+    p.add_argument(
+        "--feature-set", default=None, help="Override feature set (full / indicators_only / ohlcv)"
+    )
     return p.parse_args(argv)
 
 
@@ -57,15 +62,21 @@ def main(argv: list[str] | None = None) -> int:
         print("[train] No CPGW session — run `python -m live.cpgw_keeper` first.")
         return 1
 
-    print(f"[train] CPGW {app_cfg.ib.host}:{app_cfg.ib.port}  symbol={args.symbol}  kind={args.kind}")
+    print(
+        f"[train] CPGW {app_cfg.ib.host}:{app_cfg.ib.port}  symbol={args.symbol}  kind={args.kind}"
+    )
     client = CPGWClient(cookie=session["cookie"], port=app_cfg.ib.port)
     if session.get("account_id"):
         client.account_id = session["account_id"]
 
     try:
-        print(f"[train] fetching {args.symbol} bar={sym_cfg.bar_size} period={sym_cfg.history_duration}")
+        print(
+            f"[train] fetching {args.symbol} bar={sym_cfg.bar_size} period={sym_cfg.history_duration}"
+        )
         raw = client.get_historical_data(
-            args.symbol, bar=sym_cfg.bar_size, period=sym_cfg.history_duration,
+            args.symbol,
+            bar=sym_cfg.bar_size,
+            period=sym_cfg.history_duration,
         )
         if raw is None or raw.empty:
             print("[train] no data returned; check market hours / contract / permissions")
@@ -89,12 +100,18 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         threshold = calculate_dynamic_threshold(df, window=sym_cfg.trading.shift)
-        print(f"[train] dynamic threshold={threshold:.4%}  bars={len(df)}  features={len(features)}")
+        print(
+            f"[train] dynamic threshold={threshold:.4%}  bars={len(df)}  features={len(features)}"
+        )
 
         if args.kind == "xgboost":
             model, meta = train_xgboost(
-                df, features, threshold, sym_cfg.trading.shift,
-                classifier=args.classifier, use_smote=not args.no_smote,
+                df,
+                features,
+                threshold,
+                sym_cfg.trading.shift,
+                classifier=args.classifier,
+                use_smote=not args.no_smote,
             )
         else:
             model, meta = train_lstm(df, features, threshold, sym_cfg.trading.shift)

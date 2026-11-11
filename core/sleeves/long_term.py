@@ -27,12 +27,13 @@ from core.config import LongTermSleeveConfig
 @dataclass
 class LongTermDecision:
     """One symbol's piece of a rebalance plan."""
+
     symbol: str
     target_weight: float
     target_value: float
     target_shares: int
     current_shares: int
-    delta_shares: int       # positive → buy, negative → sell
+    delta_shares: int  # positive → buy, negative → sell
     close_price: float
     reason: str
 
@@ -116,24 +117,32 @@ class AllWeatherSleeve:
             close = prices.get(sym, 0.0)
             if close <= 0:
                 # No price → we can't size. Skip but still emit a record.
-                decisions.append(LongTermDecision(
-                    symbol=sym, target_weight=weight,
-                    target_value=0.0, target_shares=0,
-                    current_shares=current_holdings.get(sym, 0),
-                    delta_shares=0, close_price=0.0,
-                    reason="missing price",
-                ))
+                decisions.append(
+                    LongTermDecision(
+                        symbol=sym,
+                        target_weight=weight,
+                        target_value=0.0,
+                        target_shares=0,
+                        current_shares=current_holdings.get(sym, 0),
+                        delta_shares=0,
+                        close_price=0.0,
+                        reason="missing price",
+                    )
+                )
                 continue
             target_value = sleeve_equity * weight
             target_shares = int(target_value / close)
             current = current_holdings.get(sym, 0)
-            decisions.append(LongTermDecision(
-                symbol=sym, target_weight=weight,
-                target_value=target_shares * close,
-                target_shares=target_shares,
-                current_shares=current,
-                delta_shares=target_shares - current,
-                close_price=close,
-                reason=f"target {weight:.1%} of ${sleeve_equity:,.0f}",
-            ))
+            decisions.append(
+                LongTermDecision(
+                    symbol=sym,
+                    target_weight=weight,
+                    target_value=target_shares * close,
+                    target_shares=target_shares,
+                    current_shares=current,
+                    delta_shares=target_shares - current,
+                    close_price=close,
+                    reason=f"target {weight:.1%} of ${sleeve_equity:,.0f}",
+                )
+            )
         return decisions

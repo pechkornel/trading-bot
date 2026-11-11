@@ -26,13 +26,14 @@ from core.sizing import PortfolioParams, SizingDecision, SymbolSignal, size_port
 @dataclass
 class TacticalInput:
     """One symbol's snapshot at decision time, pre-fusion."""
+
     symbol: str
     ta_prediction: int
     ta_confidence: float
     close: float
     atr: float
     realized_vol: float
-    sentiment_score: float | None     # None if no fresh sentiment
+    sentiment_score: float | None  # None if no fresh sentiment
 
 
 @dataclass
@@ -40,7 +41,7 @@ class TacticalDecision:
     symbol: str
     fused: FusedSignal
     sizing: SizingDecision
-    sleeve_equity: float              # equity allocated to this sleeve at decision time
+    sleeve_equity: float  # equity allocated to this sleeve at decision time
 
 
 class TacticalSleeve:
@@ -72,14 +73,16 @@ class TacticalSleeve:
         signals: list[SymbolSignal] = []
         for inp in inputs:
             f = fused_by_sym[inp.symbol]
-            signals.append(SymbolSignal(
-                symbol=inp.symbol,
-                prediction=inp.ta_prediction,       # sizer checks BULLISH_CLASSES
-                confidence=f.combined_confidence,
-                close=inp.close,
-                atr=inp.atr,
-                realized_vol=inp.realized_vol,
-            ))
+            signals.append(
+                SymbolSignal(
+                    symbol=inp.symbol,
+                    prediction=inp.ta_prediction,  # sizer checks BULLISH_CLASSES
+                    confidence=f.combined_confidence,
+                    close=inp.close,
+                    atr=inp.atr,
+                    realized_vol=inp.realized_vol,
+                )
+            )
 
         # 3) size with this sleeve's own equity + caps
         params = PortfolioParams(

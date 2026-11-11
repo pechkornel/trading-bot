@@ -26,18 +26,39 @@ import pandas as pd
 # Old config (TWS notation) → CPGW notation.
 # CPGW accepts: 1min, 2min, 3min, 5min, 10min, 15min, 30min, 1h, 2h, 3h, 4h, 8h, 1d, 1w, 1m
 _BAR_SIZE_MAP = {
-    "1 min": "1min", "2 mins": "2min", "3 mins": "3min", "5 mins": "5min",
-    "10 mins": "10min", "15 mins": "15min", "30 mins": "30min",
-    "1 hour": "1h", "1 hours": "1h", "2 hours": "2h", "3 hours": "3h",
-    "4 hours": "4h", "8 hours": "8h",
-    "1 day": "1d", "1 week": "1w", "1 month": "1m",
+    "1 min": "1min",
+    "2 mins": "2min",
+    "3 mins": "3min",
+    "5 mins": "5min",
+    "10 mins": "10min",
+    "15 mins": "15min",
+    "30 mins": "30min",
+    "1 hour": "1h",
+    "1 hours": "1h",
+    "2 hours": "2h",
+    "3 hours": "3h",
+    "4 hours": "4h",
+    "8 hours": "8h",
+    "1 day": "1d",
+    "1 week": "1w",
+    "1 month": "1m",
 }
 
 # CPGW accepts: {1-30}min, {1-8}h, {1-1000}d, {1-792}w, {1-182}m, {1-15}y
 _PERIOD_MAP = {
-    "1 D": "1d", "2 D": "2d", "5 D": "5d", "10 D": "10d", "30 D": "30d",
-    "1 W": "1w", "2 W": "2w", "1 M": "1m", "3 M": "3m", "6 M": "6m",
-    "1 Y": "1y", "2 Y": "2y", "5 Y": "5y",
+    "1 D": "1d",
+    "2 D": "2d",
+    "5 D": "5d",
+    "10 D": "10d",
+    "30 D": "30d",
+    "1 W": "1w",
+    "2 W": "2w",
+    "1 M": "1m",
+    "3 M": "3m",
+    "6 M": "6m",
+    "1 Y": "1y",
+    "2 Y": "2y",
+    "5 Y": "5y",
 }
 
 
@@ -59,6 +80,7 @@ def _translate_period(period: str) -> str:
 
 # ---- exceptions ----------------------------------------------------------
 
+
 class CPGWError(RuntimeError):
     """Any non-2xx from the gateway, or a structural problem with its response."""
 
@@ -69,9 +91,11 @@ class NotAuthenticatedError(CPGWError):
 
 # ---- order types ---------------------------------------------------------
 
+
 @dataclass
 class OrderTicket:
     """One submitted order's identifiers as returned by CPGW."""
+
     order_id: str
     local_order_id: str | None = None
     order_status: str | None = None
@@ -79,6 +103,7 @@ class OrderTicket:
 
 
 # ---- the client ----------------------------------------------------------
+
 
 class CPGWClient:
     """
@@ -105,7 +130,7 @@ class CPGWClient:
         self._conid_cache: dict[str, int] = {}
         self._client = httpx.Client(
             base_url=f"https://{host}:{port}",
-            verify=False,            # CPGW uses a self-signed cert; URL is localhost-pinned
+            verify=False,  # CPGW uses a self-signed cert; URL is localhost-pinned
             timeout=timeout,
             headers={
                 "accept": "application/json",
@@ -133,9 +158,7 @@ class CPGWClient:
         if r.status_code == 401:
             raise NotAuthenticatedError(f"{method} {path} -> 401, session expired")
         if r.status_code >= 400:
-            raise CPGWError(
-                f"{method} {path} -> {r.status_code}: {r.text[:300]}"
-            )
+            raise CPGWError(f"{method} {path} -> {r.status_code}: {r.text[:300]}")
         if not r.text:
             return None
         try:
@@ -160,7 +183,8 @@ class CPGWClient:
     def ssodh_init(self, *, publish: bool = True, compete: bool = True) -> dict[str, Any]:
         """First call after fresh SSO login — initialises the brokerage session."""
         return self._request(
-            "POST", "/v1/api/iserver/auth/ssodh/init",
+            "POST",
+            "/v1/api/iserver/auth/ssodh/init",
             json={"publish": publish, "compete": compete},
         )
 
@@ -222,8 +246,11 @@ class CPGWClient:
                 contracts = first.get("contracts", [])
                 # Pick the SMART/USD contract for US listings
                 preferred = next(
-                    (c for c in contracts
-                     if c.get("exchange") == "SMART" or c.get("isUS") in (True, "true")),
+                    (
+                        c
+                        for c in contracts
+                        if c.get("exchange") == "SMART" or c.get("isUS") in (True, "true")
+                    ),
                     contracts[0] if contracts else None,
                 )
                 if preferred and preferred.get("conid"):
@@ -235,7 +262,8 @@ class CPGWClient:
 
         # Fallback: /iserver/secdef/search (more general, less reliable for exact match)
         results = self._request(
-            "GET", "/v1/api/iserver/secdef/search",
+            "GET",
+            "/v1/api/iserver/secdef/search",
             params={"symbol": symbol, "name": "false", "secType": "STK"},
         )
         if not results:
@@ -276,8 +304,14 @@ class CPGWClient:
 
         # CPGW format: each bar is {t: ms_epoch, o, h, l, c, v}
         df = pd.DataFrame(bars).rename(
-            columns={"t": "time", "o": "Open", "h": "High",
-                     "l": "Low", "c": "Close", "v": "Volume"},
+            columns={
+                "t": "time",
+                "o": "Open",
+                "h": "High",
+                "l": "Low",
+                "c": "Close",
+                "v": "Volume",
+            },
         )
         df["time"] = pd.to_datetime(df["time"], unit="ms")
         df = df.set_index("time")[["Open", "High", "Low", "Close", "Volume"]]
@@ -296,7 +330,8 @@ class CPGWClient:
         """
         self._ensure_account()
         resp = self._request(
-            "POST", f"/v1/api/iserver/account/{self.account_id}/orders",
+            "POST",
+            f"/v1/api/iserver/account/{self.account_id}/orders",
             json={"orders": orders},
         )
         return self._handle_order_response(resp)
@@ -312,12 +347,14 @@ class CPGWClient:
                 out.extend(self._handle_order_response(reply))
                 continue
             if isinstance(item, dict) and (item.get("order_id") or item.get("orderId")):
-                out.append(OrderTicket(
-                    order_id=str(item.get("order_id") or item.get("orderId")),
-                    local_order_id=item.get("local_order_id"),
-                    order_status=item.get("order_status") or item.get("orderStatus"),
-                    raw=item,
-                ))
+                out.append(
+                    OrderTicket(
+                        order_id=str(item.get("order_id") or item.get("orderId")),
+                        local_order_id=item.get("local_order_id"),
+                        order_status=item.get("order_status") or item.get("orderStatus"),
+                        raw=item,
+                    )
+                )
             else:
                 # Unexpected shape — capture for debugging but don't crash
                 out.append(OrderTicket(order_id="?", raw=item))
@@ -325,14 +362,16 @@ class CPGWClient:
 
     def _reply(self, reply_id: str, *, confirmed: bool) -> Any:
         return self._request(
-            "POST", f"/v1/api/iserver/reply/{reply_id}",
+            "POST",
+            f"/v1/api/iserver/reply/{reply_id}",
             json={"confirmed": confirmed},
         )
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         self._ensure_account()
         return self._request(
-            "DELETE", f"/v1/api/iserver/account/{self.account_id}/order/{order_id}",
+            "DELETE",
+            f"/v1/api/iserver/account/{self.account_id}/order/{order_id}",
         )
 
     def list_open_orders(self) -> dict[str, Any]:
@@ -341,19 +380,21 @@ class CPGWClient:
     # ---- order builders (high-level helpers the runners actually call) ----
 
     @staticmethod
-    def build_market_order(*, conid: int, side: str, quantity: float,
-                           tif: str = "DAY") -> dict[str, Any]:
+    def build_market_order(
+        *, conid: int, side: str, quantity: float, tif: str = "DAY"
+    ) -> dict[str, Any]:
         return {
             "conid": int(conid),
-            "side": side.upper(),                     # "BUY" / "SELL"
+            "side": side.upper(),  # "BUY" / "SELL"
             "orderType": "MKT",
             "quantity": float(quantity),
             "tif": tif,
         }
 
     @staticmethod
-    def build_limit_order(*, conid: int, side: str, quantity: float, price: float,
-                          tif: str = "DAY") -> dict[str, Any]:
+    def build_limit_order(
+        *, conid: int, side: str, quantity: float, price: float, tif: str = "DAY"
+    ) -> dict[str, Any]:
         return {
             "conid": int(conid),
             "side": side.upper(),
@@ -406,7 +447,7 @@ class CPGWClient:
             "parentId": parent_coid,
             "side": "SELL",
             "orderType": "STP",
-            "price": float(stop_loss_price),   # CPGW uses `price` for the stop trigger
+            "price": float(stop_loss_price),  # CPGW uses `price` for the stop trigger
             "quantity": float(quantity),
             "tif": tif,
         }
@@ -415,16 +456,28 @@ class CPGWClient:
     def place_market_buy(self, symbol: str, quantity: float) -> OrderTicket:
         """Convenience for the long-term rebalance legs (no bracket)."""
         conid = self.conid_for_stock(symbol)
-        out = self.place_orders([self.build_market_order(
-            conid=conid, side="BUY", quantity=quantity,
-        )])
+        out = self.place_orders(
+            [
+                self.build_market_order(
+                    conid=conid,
+                    side="BUY",
+                    quantity=quantity,
+                )
+            ]
+        )
         return out[0]
 
     def place_market_sell(self, symbol: str, quantity: float) -> OrderTicket:
         conid = self.conid_for_stock(symbol)
-        out = self.place_orders([self.build_market_order(
-            conid=conid, side="SELL", quantity=quantity,
-        )])
+        out = self.place_orders(
+            [
+                self.build_market_order(
+                    conid=conid,
+                    side="SELL",
+                    quantity=quantity,
+                )
+            ]
+        )
         return out[0]
 
 
@@ -432,6 +485,7 @@ class CPGWClient:
 # we know we're talking to a self-signed localhost cert.
 try:
     import urllib3
+
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 except Exception:
     pass

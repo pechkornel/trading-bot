@@ -7,24 +7,46 @@ config1/config2 with subtle differences. Consolidated here.
 
 # Indicators only (no raw OHLC). Matches the old `config1` in trading_bot_1_for_tests.
 CONFIG_INDICATORS_ONLY = [
-    "RSI", "MACD", "EMA",
-    "BB_Upper", "BB_Lower",
-    "OBV", "ATR", "ADX",
-    "MA_1", "MA_2", "MA_3",
+    "RSI",
+    "MACD",
+    "EMA",
+    "BB_Upper",
+    "BB_Lower",
+    "OBV",
+    "ATR",
+    "ADX",
+    "MA_1",
+    "MA_2",
+    "MA_3",
     "Volume",
-    "LRC_Middle", "LRC_Slope", "LRC_Breakout",
+    "LRC_Middle",
+    "LRC_Slope",
+    "LRC_Breakout",
 ]
 
 # OHLC + indicators + recent lows. Matches the old `config2` in model_selector folders.
 CONFIG_FULL = [
-    "Open", "High", "Low", "Close",
-    "RSI", "MACD", "EMA",
-    "BB_Upper", "BB_Lower",
-    "OBV", "ATR", "ADX",
-    "MA_1", "MA_2", "MA_3",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "RSI",
+    "MACD",
+    "EMA",
+    "BB_Upper",
+    "BB_Lower",
+    "OBV",
+    "ATR",
+    "ADX",
+    "MA_1",
+    "MA_2",
+    "MA_3",
     "Volume",
-    "LRC_Middle", "LRC_Slope",
-    "Last10low", "Last50low", "Last100low",
+    "LRC_Middle",
+    "LRC_Slope",
+    "Last10low",
+    "Last50low",
+    "Last100low",
 ]
 
 # Raw OHLCV only. Matches the old `config3`.

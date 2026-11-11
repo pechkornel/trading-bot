@@ -28,10 +28,10 @@ from urllib.error import URLError, HTTPError
 @dataclass
 class SentimentReading:
     symbol: str
-    score: float            # [-1, 1]
-    confidence: float       # [0, 1]
+    score: float  # [-1, 1]
+    confidence: float  # [0, 1]
     article_count: int
-    source: str             # "stub", "alpha_vantage", etc.
+    source: str  # "stub", "alpha_vantage", etc.
     raw_json: str | None = None
 
 
@@ -40,24 +40,24 @@ class SentimentProvider(Protocol):
 
     name: str
 
-    def fetch_batch(self, symbols: list[str]) -> list[SentimentReading]:
-        ...
+    def fetch_batch(self, symbols: list[str]) -> list[SentimentReading]: ...
 
 
 # ---------- Stub ----------
+
 
 class StubProvider:
     name = "stub"
 
     def fetch_batch(self, symbols: list[str]) -> list[SentimentReading]:
         return [
-            SentimentReading(symbol=s, score=0.0, confidence=0.0,
-                             article_count=0, source=self.name)
+            SentimentReading(symbol=s, score=0.0, confidence=0.0, article_count=0, source=self.name)
             for s in symbols
         ]
 
 
 # ---------- Alpha Vantage ----------
+
 
 class AlphaVantageProvider:
     """
@@ -153,15 +153,20 @@ class AlphaVantageProvider:
             if weights[s] > 0:
                 raw = sums[s] / weights[s]
                 normalized = self._normalize(raw)
-                conf = min(1.0, counts[s] / 20.0)   # 20 relevant articles → full confidence
+                conf = min(1.0, counts[s] / 20.0)  # 20 relevant articles → full confidence
             else:
                 normalized = 0.0
                 conf = 0.0
-            out.append(SentimentReading(
-                symbol=s, score=normalized, confidence=conf,
-                article_count=counts[s], source=self.name,
-                raw_json=None,    # don't store full feed per symbol — too verbose
-            ))
+            out.append(
+                SentimentReading(
+                    symbol=s,
+                    score=normalized,
+                    confidence=conf,
+                    article_count=counts[s],
+                    source=self.name,
+                    raw_json=None,  # don't store full feed per symbol — too verbose
+                )
+            )
         return out
 
     @staticmethod
@@ -171,6 +176,7 @@ class AlphaVantageProvider:
 
 
 # ---------- Factory ----------
+
 
 def get_provider(name: str) -> SentimentProvider:
     if name == "stub":

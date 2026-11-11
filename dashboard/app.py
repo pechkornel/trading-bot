@@ -21,8 +21,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from core.config import (
-    LOGS_DIR, load_app_config, load_portfolio,
-    load_sentiment_config, load_sleeves,
+    LOGS_DIR,
+    load_app_config,
+    load_portfolio,
+    load_sentiment_config,
+    load_sleeves,
 )
 from dashboard import process as procmgr
 from live.storage import Storage
@@ -43,12 +46,14 @@ def _storage() -> Storage:
 
 # ---------- pages ----------
 
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     cfg = load_app_config()
     s = _storage()
     return templates.TemplateResponse(
-        request, "index.html",
+        request,
+        "index.html",
         {
             "cfg": cfg,
             "predictions": s.recent_predictions(limit=20),
@@ -67,7 +72,8 @@ def models_page(request: Request):
 @app.get("/control", response_class=HTMLResponse)
 def control_page(request: Request):
     return templates.TemplateResponse(
-        request, "control.html",
+        request,
+        "control.html",
         {
             "cfg": load_app_config(),
             "portfolio": load_portfolio(),
@@ -82,13 +88,17 @@ def targets_page(request: Request, limit: int = 10, sleeve: str | None = None):
     cycles = _storage().recent_target_cycles(limit=limit)
     if sleeve:
         cycles = [
-            {"cycle_id": c["cycle_id"], "ts": c["ts"],
-             "targets": [t for t in c["targets"] if t["sleeve"] == sleeve]}
+            {
+                "cycle_id": c["cycle_id"],
+                "ts": c["ts"],
+                "targets": [t for t in c["targets"] if t["sleeve"] == sleeve],
+            }
             for c in cycles
         ]
         cycles = [c for c in cycles if c["targets"]]
     return templates.TemplateResponse(
-        request, "targets.html",
+        request,
+        "targets.html",
         {"cycles": cycles, "sleeve_filter": sleeve},
     )
 
@@ -102,7 +112,8 @@ def sleeves_page(request: Request):
     lt_eq = total * lt_cfg.allocation_pct
     tc_eq = total * tc_cfg.allocation_pct
     return templates.TemplateResponse(
-        request, "sleeves.html",
+        request,
+        "sleeves.html",
         {
             "total_equity": total,
             "lt_cfg": lt_cfg,
@@ -120,17 +131,20 @@ def sleeves_page(request: Request):
 @app.get("/logs/{name}", response_class=HTMLResponse)
 def logs_page(request: Request, name: str, lines: int = 200):
     return templates.TemplateResponse(
-        request, "logs.html",
+        request,
+        "logs.html",
         {"name": name, "content": procmgr.tail_log(name, lines=lines), "lines": lines},
     )
 
 
 # ---------- HTMX partials (auto-refresh every few seconds) ----------
 
+
 @app.get("/partials/status", response_class=HTMLResponse)
 def partial_status(request: Request):
     return templates.TemplateResponse(
-        request, "partials/status.html",
+        request,
+        "partials/status.html",
         {"cfg": load_app_config(), "processes": procmgr.list_processes()},
     )
 
@@ -138,7 +152,8 @@ def partial_status(request: Request):
 @app.get("/partials/predictions", response_class=HTMLResponse)
 def partial_predictions(request: Request, symbol: str | None = None, limit: int = 20):
     return templates.TemplateResponse(
-        request, "partials/predictions.html",
+        request,
+        "partials/predictions.html",
         {"predictions": _storage().recent_predictions(limit, symbol)},
     )
 
@@ -146,7 +161,8 @@ def partial_predictions(request: Request, symbol: str | None = None, limit: int 
 @app.get("/partials/orders", response_class=HTMLResponse)
 def partial_orders(request: Request, limit: int = 20):
     return templates.TemplateResponse(
-        request, "partials/orders.html",
+        request,
+        "partials/orders.html",
         {"orders": _storage().recent_orders(limit)},
     )
 
@@ -154,12 +170,14 @@ def partial_orders(request: Request, limit: int = 20):
 @app.get("/partials/events", response_class=HTMLResponse)
 def partial_events(request: Request, limit: int = 30):
     return templates.TemplateResponse(
-        request, "partials/events.html",
+        request,
+        "partials/events.html",
         {"events": _storage().recent_events(limit)},
     )
 
 
 # ---------- JSON APIs (for Chart.js and external tooling) ----------
+
 
 @app.get("/api/predictions")
 def api_predictions(symbol: str | None = None, limit: int = 500):
@@ -190,10 +208,18 @@ def api_equity(limit: int = 1000):
 
 @app.get("/api/processes")
 def api_processes():
-    return JSONResponse([{
-        "name": p.name, "pid": p.pid, "cmd": p.cmd,
-        "started_at": p.started_at, "log_path": p.log_path,
-    } for p in procmgr.list_processes()])
+    return JSONResponse(
+        [
+            {
+                "name": p.name,
+                "pid": p.pid,
+                "cmd": p.cmd,
+                "started_at": p.started_at,
+                "log_path": p.log_path,
+            }
+            for p in procmgr.list_processes()
+        ]
+    )
 
 
 @app.get("/api/health")
@@ -211,6 +237,7 @@ def api_health():
 
 # ---------- control actions (POST → redirect) ----------
 
+
 @app.post("/actions/runner/start")
 def action_start_runner(
     symbol: str = Form(...),
@@ -220,7 +247,8 @@ def action_start_runner(
 ):
     try:
         procmgr.start_runner(
-            symbol=symbol, model=model,
+            symbol=symbol,
+            model=model,
             dry_run=(mode != "live"),
             quantity=quantity,
         )
@@ -279,10 +307,23 @@ def api_sentiment():
     for sym in cfg.symbols:
         row = s.latest_sentiment(sym, max_age_sec=86400)
         if row:
-            out.append({"symbol": sym, **{k: row[k] for k in ("ts","score","confidence","article_count","source")}})
+            out.append(
+                {
+                    "symbol": sym,
+                    **{k: row[k] for k in ("ts", "score", "confidence", "article_count", "source")},
+                }
+            )
         else:
-            out.append({"symbol": sym, "ts": None, "score": None, "confidence": None,
-                        "article_count": 0, "source": cfg.provider})
+            out.append(
+                {
+                    "symbol": sym,
+                    "ts": None,
+                    "score": None,
+                    "confidence": None,
+                    "article_count": 0,
+                    "source": cfg.provider,
+                }
+            )
     return JSONResponse(out)
 
 

@@ -33,16 +33,18 @@ from core.config import SentimentSatelliteConfig
 @dataclass
 class SentimentInput:
     """One symbol's snapshot the runner passes to the sleeve."""
+
     symbol: str
     price: float
-    sentiment_score: float | None       # None if no fresh reading
+    sentiment_score: float | None  # None if no fresh reading
     article_count: int
-    sentiment_ts: datetime | None       # when the sentiment was captured
+    sentiment_ts: datetime | None  # when the sentiment was captured
 
 
 @dataclass
 class Position:
     """An open satellite position the runner reads from `holdings`."""
+
     symbol: str
     shares: int
     entry_price: float
@@ -63,14 +65,14 @@ class SatelliteExit:
     symbol: str
     shares: int
     price: float
-    reason: str                         # "10-day hard exit" / "5% stop" / etc.
+    reason: str  # "10-day hard exit" / "5% stop" / etc.
 
 
 @dataclass
 class SatelliteCycleResult:
     entries: list[SatelliteEntry]
     exits: list[SatelliteExit]
-    skipped: list[tuple[str, str]]      # (symbol, why-skipped) — useful in /targets
+    skipped: list[tuple[str, str]]  # (symbol, why-skipped) — useful in /targets
 
 
 class SentimentSatelliteSleeve:
@@ -107,15 +109,18 @@ class SentimentSatelliteSleeve:
                 if exit_reason:
                     inp = inputs.get(sym)
                     exit_price = inp.price if inp else pos.entry_price
-                    exits.append(SatelliteExit(
-                        symbol=sym, shares=pos.shares,
-                        price=exit_price, reason=exit_reason,
-                    ))
+                    exits.append(
+                        SatelliteExit(
+                            symbol=sym,
+                            shares=pos.shares,
+                            price=exit_price,
+                            reason=exit_reason,
+                        )
+                    )
 
         # Recompute available slots after exits
         remaining_positions = {
-            s: p for s, p in positions.items()
-            if not any(e.symbol == s for e in exits)
+            s: p for s, p in positions.items() if not any(e.symbol == s for e in exits)
         }
         open_slots = self.cfg.max_concurrent_positions - len(remaining_positions)
 
@@ -123,11 +128,8 @@ class SentimentSatelliteSleeve:
         if allow_entries and open_slots > 0:
             # Rank candidates by sentiment_score descending (best entry first)
             candidates = sorted(
-                (
-                    (sym, inp) for sym, inp in inputs.items()
-                    if sym in self.cfg.universe
-                ),
-                key=lambda kv: (kv[1].sentiment_score or 0.0),
+                ((sym, inp) for sym, inp in inputs.items() if sym in self.cfg.universe),
+                key=lambda kv: kv[1].sentiment_score or 0.0,
                 reverse=True,
             )
             for sym, inp in candidates:
@@ -151,10 +153,15 @@ class SentimentSatelliteSleeve:
                     skipped.append((sym, "rounds to 0 shares"))
                     continue
 
-                entries.append(SatelliteEntry(
-                    symbol=sym, shares=shares, price=inp.price,
-                    target_value=shares * inp.price, reason=reason_or_skip,
-                ))
+                entries.append(
+                    SatelliteEntry(
+                        symbol=sym,
+                        shares=shares,
+                        price=inp.price,
+                        target_value=shares * inp.price,
+                        reason=reason_or_skip,
+                    )
+                )
                 open_slots -= 1
 
         return SatelliteCycleResult(entries=entries, exits=exits, skipped=skipped)
@@ -174,12 +181,14 @@ class SentimentSatelliteSleeve:
         if inp.price <= 0:
             return "skip: no price"
         return (
-            f"enter: sent={inp.sentiment_score:+.2f} articles={inp.article_count} "
-            f"@ {inp.price:.2f}"
+            f"enter: sent={inp.sentiment_score:+.2f} articles={inp.article_count} @ {inp.price:.2f}"
         )
 
     def _maybe_exit_reason(
-        self, pos: Position, inp: SentimentInput | None, now: datetime,
+        self,
+        pos: Position,
+        inp: SentimentInput | None,
+        now: datetime,
     ) -> str | None:
         """Returns a reason if this position should exit now, else None."""
         # Hard time-based exit

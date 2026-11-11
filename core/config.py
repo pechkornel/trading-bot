@@ -38,6 +38,7 @@ PAPER_PORTS: set[int] = {5000}
 @dataclass
 class IndicatorParams:
     """Indicator hyperparameters. Defaults match the legacy settings.py."""
+
     rsi_length: int = 14
     overbought: int = 75
     oversold: int = 25
@@ -57,10 +58,11 @@ class IndicatorParams:
 @dataclass
 class TradingParams:
     """Risk / sizing / prediction params."""
-    rr_ratio: float = 4.0          # Risk-reward ratio for bracket take-profit
-    risk_pct: float = 0.02         # Risk per trade
-    atr_multiplier: float = 2.0    # ATR multiplier for stop placement
-    shift: int = 5                 # Periods ahead to predict (target horizon)
+
+    rr_ratio: float = 4.0  # Risk-reward ratio for bracket take-profit
+    risk_pct: float = 0.02  # Risk per trade
+    atr_multiplier: float = 2.0  # ATR multiplier for stop placement
+    shift: int = 5  # Periods ahead to predict (target horizon)
     confidence_threshold: float = 0.5
     prediction_interval_sec: int = 20
 
@@ -68,12 +70,13 @@ class TradingParams:
 @dataclass
 class SymbolConfig:
     """Per-symbol config loaded from symbols.yaml."""
+
     symbol: str
     feature_set: str = "full"
     bar_size: str = "5 mins"
     history_duration: str = "5 D"
     timeframe_label: str = "5min"
-    model: str | None = None     # Registry name; portfolio runner uses this
+    model: str | None = None  # Registry name; portfolio runner uses this
     indicator: IndicatorParams = field(default_factory=IndicatorParams)
     trading: TradingParams = field(default_factory=TradingParams)
     enabled: bool = True
@@ -82,6 +85,7 @@ class SymbolConfig:
 @dataclass
 class PortfolioConfig:
     """Portfolio-level sizing config, loaded from the `portfolio:` block in symbols.yaml."""
+
     starting_equity: float = 100_000.0
     cycle_interval_sec: int = 60
     reentry_cooldown_sec: int = 600
@@ -90,6 +94,7 @@ class PortfolioConfig:
 @dataclass
 class TacticalSleeveConfig:
     """Short-term sleeve. DISABLED in Phase 8 (enabled=false in config)."""
+
     enabled: bool = False
     allocation_pct: float = 0.0
     universe: list[str] = field(default_factory=lambda: ["SPY", "AAPL", "QQQ", "GLD"])
@@ -112,14 +117,23 @@ class CoreSleeveConfig:
     Hard risk-off filter to bonds when SPY is below its 200-day MA AND VIX
     is above the threshold.
     """
+
     enabled: bool = True
     allocation_pct: float = 0.70
-    universe: list[str] = field(default_factory=lambda: [
-        "SPY", "IWM", "EFA", "VWO",
-        "TLT", "IEF", "AGG",
-        "GLD", "DBC",
-        "BIL",
-    ])
+    universe: list[str] = field(
+        default_factory=lambda: [
+            "SPY",
+            "IWM",
+            "EFA",
+            "VWO",
+            "TLT",
+            "IEF",
+            "AGG",
+            "GLD",
+            "DBC",
+            "BIL",
+        ]
+    )
     hold_top_n: int = 4
     momentum_weight: float = 0.40
     macro_weight: float = 0.30
@@ -129,18 +143,29 @@ class CoreSleeveConfig:
     risk_off_spy_ma_days: int = 200
     risk_off_vix_threshold: float = 25.0
     risk_off_universe: list[str] = field(default_factory=lambda: ["TLT", "IEF"])
-    rebalance_day_of_week: int = 4        # 0=Mon, 4=Fri
+    rebalance_day_of_week: int = 4  # 0=Mon, 4=Fri
     drift_threshold: float = 0.08
 
 
 @dataclass
 class SentimentSatelliteConfig:
     """News-sentiment satellite sleeve (Phase 8B)."""
+
     enabled: bool = False
     allocation_pct: float = 0.20
-    universe: list[str] = field(default_factory=lambda: [
-        "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "GOOGL",
-    ])
+    universe: list[str] = field(
+        default_factory=lambda: [
+            "SPY",
+            "QQQ",
+            "AAPL",
+            "MSFT",
+            "NVDA",
+            "TSLA",
+            "AMZN",
+            "META",
+            "GOOGL",
+        ]
+    )
     sentiment_threshold: float = 0.4
     min_article_count: int = 5
     max_concurrent_positions: int = 4
@@ -153,38 +178,51 @@ class SentimentSatelliteConfig:
 @dataclass
 class MacroConfig:
     """FRED + yfinance feeds powering the core sleeve's macro score."""
-    fred_series: dict[str, str] = field(default_factory=lambda: {
-        "yield_curve": "T10Y2Y",
-        "fed_funds": "DFF",
-        "ten_year": "DGS10",
-        "two_year": "DGS2",
-        "cpi": "CPIAUCSL",
-        "unemployment": "UNRATE",
-    })
-    yf_tickers: dict[str, str] = field(default_factory=lambda: {
-        "vix": "^VIX",
-        "dxy": "DX-Y.NYB",
-        "hyg": "HYG",
-        "lqd": "LQD",
-    })
+
+    fred_series: dict[str, str] = field(
+        default_factory=lambda: {
+            "yield_curve": "T10Y2Y",
+            "fed_funds": "DFF",
+            "ten_year": "DGS10",
+            "two_year": "DGS2",
+            "cpi": "CPIAUCSL",
+            "unemployment": "UNRATE",
+        }
+    )
+    yf_tickers: dict[str, str] = field(
+        default_factory=lambda: {
+            "vix": "^VIX",
+            "dxy": "DX-Y.NYB",
+            "hyg": "HYG",
+            "lqd": "LQD",
+        }
+    )
     cache_ttl_sec: int = 21600
 
 
 @dataclass
 class LongTermSleeveConfig:
     """Long-term sleeve: fixed weights (All-Weather), monthly/drift rebalance."""
+
     allocation_pct: float = 0.80
     strategy: str = "all_weather"
     rebalance_freq_days: int = 30
     drift_threshold: float = 0.05
-    universe: dict[str, float] = field(default_factory=lambda: {
-        "SPY": 0.30, "TLT": 0.40, "IEF": 0.15, "DBC": 0.075, "GLD": 0.075,
-    })
+    universe: dict[str, float] = field(
+        default_factory=lambda: {
+            "SPY": 0.30,
+            "TLT": 0.40,
+            "IEF": 0.15,
+            "DBC": 0.075,
+            "GLD": 0.075,
+        }
+    )
 
 
 @dataclass
 class SentimentConfig:
     """Sentiment provider + polling cadence."""
+
     provider: str = "stub"
     poll_interval_sec: int = 3600
     staleness_sec: int = 7200
@@ -200,14 +238,16 @@ class IBConfig:
     rest of the codebase, but it now points at the Client Portal Gateway
     (default port 5000), not the TWS IB Gateway.
     """
+
     host: str = "localhost"
-    port: int = 5000          # CPGW default; only paper-port allowed
-    client_id: int = 0        # kept for legacy callers; CPGW doesn't use it
+    port: int = 5000  # CPGW default; only paper-port allowed
+    client_id: int = 0  # kept for legacy callers; CPGW doesn't use it
 
 
 @dataclass
 class AppConfig:
     """Top-level app config."""
+
     paper: bool = True
     dry_run: bool = True
     ib: IBConfig = field(default_factory=IBConfig)
@@ -306,7 +346,9 @@ def load_sleeves() -> tuple[LongTermSleeveConfig, TacticalSleeveConfig]:
     return LongTermSleeveConfig(**lt_raw), TacticalSleeveConfig(**tc_raw)
 
 
-def load_phase8_sleeves() -> tuple[CoreSleeveConfig, SentimentSatelliteConfig, TacticalSleeveConfig]:
+def load_phase8_sleeves() -> tuple[
+    CoreSleeveConfig, SentimentSatelliteConfig, TacticalSleeveConfig
+]:
     """Phase 8 sleeves: core (medium-term) + sentiment satellite + (disabled) tactical."""
     data = _load_yaml(CONFIG_DIR / "symbols.yaml")
     sleeves = data.get("sleeves") or {}
