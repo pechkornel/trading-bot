@@ -193,6 +193,17 @@ def test_no_risk_off_when_spy_above_ma():
     assert _check_risk_off(closes, make_macro(vix=30.0), small_cfg()) == (False, None)
 
 
+def test_no_risk_off_when_vix_exactly_at_threshold():
+    # The rule is VIX strictly above the threshold (25.0 by default).
+    assert _check_risk_off(falling_spy(), make_macro(vix=25.0), small_cfg()) == (False, None)
+
+
+def test_no_risk_off_when_spy_exactly_at_its_average():
+    # The rule is SPY strictly below its moving average.
+    closes = {"SPY": series([100, 100, 100, 100, 100])}
+    assert _check_risk_off(closes, make_macro(vix=30.0), small_cfg()) == (False, None)
+
+
 def test_no_risk_off_when_vix_missing():
     assert _check_risk_off(falling_spy(), make_macro(), small_cfg()) == (False, None)
 
