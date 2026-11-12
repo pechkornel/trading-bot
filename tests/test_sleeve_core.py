@@ -108,6 +108,19 @@ def test_drift_triggers_on_a_non_rebalance_day():
     assert reason.startswith("drift: ")
 
 
+def test_underweight_holdings_trigger_drift():
+    # Half the sleeve is uninvested: each holding is 25% against a 50% target.
+    # Only the absolute distance from 1/N catches this.
+    ok, reason = check(
+        WEDNESDAY,
+        holdings={"SPY": 50, "TLT": 50},
+        prices={"SPY": 100.0, "TLT": 100.0},
+        equity=20_000.0,
+    )
+    assert ok is True
+    assert reason.startswith("drift: ")
+
+
 def test_balanced_holdings_do_not_trigger_drift():
     ok, reason = check(
         WEDNESDAY,
