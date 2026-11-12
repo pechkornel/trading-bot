@@ -210,7 +210,7 @@ With `position_pct_of_sleeve` of 0.05 that is 1,000 per position, and at most 4,
 
 ### Orders
 
-Same shape as core: `LMT`, `DAY`, price `close * 1.0005` for a BUY and `close * 0.9995` for a SELL. No bracket. Exits are sent first. A sell removes the holding row. A buy writes it with the entry price as the cost.
+Same shape as core: `LMT`, `DAY`, price `close * 1.0005` for a BUY and `close * 0.9995` for a SELL. No bracket. Exits are sent first. A sell removes the holding row. A buy writes it with the last close as the cost (`avg_cost`), not the limit price.
 
 ---
 
