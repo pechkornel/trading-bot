@@ -126,6 +126,32 @@ def test_macro_cash_with_only_yield_curve_is_zero():
     assert _macro_score("cash", make_macro(yield_curve=2.0)) == 0.0
 
 
+# DXY and credit alone only count when the snapshot is complete: an
+# incomplete snapshot with no VIX and no yield curve is treated as neutral.
+
+
+def test_macro_dxy_alone_in_incomplete_snapshot_is_neutral():
+    assert _macro_score("alt_commodity", make_macro(dxy_trend_60d=0.05)) == 0.0
+
+
+def test_macro_strong_dollar_hurts_commodities_and_helps_us_large():
+    # A 5% 60-day DXY rise is half the full signal (scaled by 10).
+    m = make_macro(dxy_trend_60d=0.05, complete=True)
+    assert _macro_score("alt_commodity", m) == pytest.approx(-0.5)
+    assert _macro_score("equity_intl_em", m) == pytest.approx(-0.5)
+    assert _macro_score("equity_us_large", m) == pytest.approx(0.5)
+    assert _macro_score("bond_long", m) == pytest.approx(0.0)
+
+
+def test_macro_falling_credit_ratio_hurts_equity_and_mildly_helps_bonds():
+    # HYG/LQD down 5% over 60 days: -0.5 for equity, half weight and
+    # inverted for bonds (+0.25).
+    m = make_macro(credit_ratio_trend_60d=-0.05, complete=True)
+    assert _macro_score("equity_us_large", m) == pytest.approx(-0.5)
+    assert _macro_score("bond_long", m) == pytest.approx(0.25)
+    assert _macro_score("alt_gold", m) == pytest.approx(0.0)
+
+
 # ---- composite ----
 
 
