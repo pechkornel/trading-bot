@@ -14,8 +14,10 @@ uv pip install -r requirements-train.txt   # only for LSTM training (adds Tensor
 uv pip install -r requirements-dev.txt     # pytest and ruff
 cp .env.example .env                       # then fill in your own values
 
-# Lint, format and tests (the form CI uses; Windows: .venv\Scripts\...)
-.venv/bin/ruff format .
+# Lint, format and tests (Windows: .venv\Scripts\...)
+.venv/bin/ruff format .                    # apply formatting
+# CI runs exactly these three:
+.venv/bin/ruff format --check .
 .venv/bin/ruff check .
 .venv/bin/python -m pytest -q
 
