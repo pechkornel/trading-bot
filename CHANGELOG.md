@@ -9,9 +9,16 @@ All notable changes to this project are documented here. The format follows
 
 - `tests/test_config.py`: regression tests for the paper-mode lock and its error message.
 - `requirements-dev.txt` with pytest.
+- `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
+- `.gitattributes` that forces LF line endings.
+- ruff 0.17.4, pinned in `requirements-dev.txt`.
+- Offline test suite (109 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env`.
+- GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge.
 
 ### Changed
 
+- The codebase is formatted with ruff. Imports are sorted and unused imports are removed.
+- `docs/TRADING_LOGIC.md` is rewritten to match the code: core sleeve (70%), sentiment satellite (20%) and the disabled tactical sleeve. It has a Known gaps section.
 - The documented install root is now `/opt/trading-bot` (the repo root, no `bot/` subfolder) in the deploy docs, all four systemd units and `deploy/backup.sh` (#2).
   **Upgrade note:** existing systemd installs at `/home/USER/trading-bot/bot` should either move the clone to `/opt/trading-bot` or edit the paths in each unit after copying it.
 - systemd units use `ProtectSystem=strict`, so only `logs/` and `models/artifacts/` are writable. Run `mkdir -p logs` before the first start.
