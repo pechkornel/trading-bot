@@ -4,15 +4,20 @@ Self-hosted, paper-trading-only portfolio bot for Interactive Brokers (Client Po
 
 ## Commands
 
-No pyproject.toml, no lint/format config, no `.github/workflows`. Dependencies live in `requirements.txt`, `requirements-train.txt` and `requirements-dev.txt` (pytest). Tests are in `tests/` (small, config only so far).
+`pyproject.toml` holds ruff and pytest config only (no `[project]` table). ruff 0.17.4 is pinned in `requirements-dev.txt`, and `core/ibkr_auth.py` is excluded from ruff. CI in `.github/workflows/ci.yml` runs `ruff format --check`, `ruff check` and pytest on Python 3.11 and 3.12 (push to main, pull requests, weekly, manual). Dependencies live in `requirements.txt`, `requirements-train.txt` and `requirements-dev.txt` (pytest, ruff). Tests are in `tests/` (scoring, core and sentiment satellite sleeves, signal fusion, sizing, Alpha Vantage parsing from a fixture, paper lock).
 
 ```sh
 # Setup (Windows venv python: .venv\Scripts\python, Linux: .venv/bin/python)
 uv venv --python 3.11
 uv pip install -r requirements.txt
 uv pip install -r requirements-train.txt   # only for LSTM training (adds TensorFlow)
-uv pip install -r requirements-dev.txt     # pytest
+uv pip install -r requirements-dev.txt     # pytest and ruff
 cp .env.example .env                       # then fill in your own values
+
+# Lint, format and tests (the form CI uses; Windows: .venv\Scripts\...)
+.venv/bin/ruff format .
+.venv/bin/ruff check .
+.venv/bin/python -m pytest -q
 
 # Portfolio runner (dry run is the default; --live sends paper orders)
 python -m live.portfolio_runner --once               # one dry-run cycle of every enabled sleeve
@@ -64,7 +69,8 @@ Data flow: CPGW daily bars and Alpha Vantage news go through `core` (indicators,
 - Git-ignored: `.env`, `.venv/`, `logs/*.sqlite`, `logs/*.log`, `models/artifacts/*/model.pkl`, `model.keras`, `scaler.gz`. A fresh clone has no trained models and no `logs/` directory, so train or copy artifacts before enabling the tactical sleeve. Only `metadata.json` and the legacy README are tracked.
 - Legacy models in `models/artifacts/legacy/` have unknown provenance (no registry metadata); treat them as baselines, not production models.
 - TensorFlow is only in `requirements-train.txt`. The Docker image installs `requirements.txt` only, so LSTM models cannot be loaded or trained there.
-- The test suite (`python -m pytest -q`) only covers config and the paper lock. Also verify changes by running a dry-run cycle (`--once`) against a paper gateway, never `--live`.
+- The test suite (`.venv/bin/python -m pytest -q`) covers scoring, the core and sentiment satellite sleeves, signal fusion, sizing, Alpha Vantage parsing from a fixture, and the paper lock. It runs offline: `tests/conftest.py` blocks the network and isolates `.env`. Also verify changes by running a dry-run cycle (`--once`) against a paper gateway, never `--live`.
+- `pyproject.toml` exists without a `[project]` table, so `uv run` and `uv sync` treat the repo as a project and create a `uv.lock`. Use `.venv/bin/python` and `.venv/bin/ruff` (Windows: `.venv\Scripts\...`) instead, and do not commit `uv.lock`.
 - Windows vs Linux: use `.venv\Scripts\python` on Windows and `.venv/bin/python` on Linux. `deploy/backup.sh` and the systemd units are Linux only. `dashboard/process.py` launches workers with `sys.executable`, so start uvicorn from the venv.
 - Deploy docs, systemd units and `deploy/backup.sh` assume the repo is cloned at `/opt/trading-bot` (the repo root is the project directory, there is no `bot/` subfolder). Edit the unit paths if you clone elsewhere.
 - The dashboard has no authentication. Never expose its port to the public internet.
