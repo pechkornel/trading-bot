@@ -122,8 +122,15 @@ def test_macro_steep_yield_curve():
 
 
 def test_macro_cash_with_only_yield_curve_is_zero():
-    # No rule matches cash, but the component still counts toward the average.
+    # No yield curve rule matches cash.
     assert _macro_score("cash", make_macro(yield_curve=2.0)) == 0.0
+
+
+def test_macro_non_matching_input_still_dilutes_the_average():
+    # Cash gets +1.0 from VIX 30 and nothing from the yield curve, but the
+    # yield curve still counts as a component: 1.0 / 2 = 0.5, not 1.0.
+    m = make_macro(yield_curve=2.0, vix=30.0)
+    assert _macro_score("cash", m) == pytest.approx(0.5)
 
 
 # DXY and credit alone only count when the snapshot is complete: an
