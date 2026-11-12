@@ -71,6 +71,10 @@ def test_too_few_articles_is_skipped():
     assert "articles=4" in result.skipped[0][1]
 
 
+def test_article_minimum_boundary_enters_at_exactly_five():
+    assert len(run([inp(count=5)]).entries) == 1
+
+
 def test_bearish_is_skipped_with_longs_only():
     result = run([inp(score=-0.8)])
     assert result.entries == []
