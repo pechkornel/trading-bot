@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (109 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env`.
+- Offline test suite (114 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env`.
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs.
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI.
 
