@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -78,6 +78,17 @@ def test_friday_without_prior_rebalance_triggers():
 
 def test_same_day_rebalance_is_not_repeated():
     assert check(FRIDAY, last=FRIDAY) == (False, "already rebalanced today")
+
+
+def test_earlier_rebalance_on_the_same_utc_date_blocks_a_repeat():
+    # Hourly cycles: the last rebalance was hours earlier on the same UTC date.
+    earlier = FRIDAY - timedelta(hours=11)  # 01:00 UTC, same date
+    assert check(FRIDAY, last=earlier) == (False, "already rebalanced today")
+
+
+def test_rebalance_on_the_previous_utc_date_does_not_block():
+    previous_week = FRIDAY - timedelta(days=7)
+    assert check(FRIDAY, last=previous_week) == (True, "calendar: Fri close")
 
 
 def test_wednesday_is_not_a_rebalance_day():
