@@ -164,6 +164,31 @@ def test_cycle_runs_the_core_calendar_trigger_and_cooldown_on_its_own_clock(tmp_
     assert buys == []
 
 
+def test_cycle_runs_the_satellite_cooldown_on_its_own_clock(tmp_path, monkeypatch):
+    # The SELL is 1 hour before the frozen clock, which is in the past. On the
+    # cycle's clock the cooldown has 23.0h left. On the real clock it ended
+    # long ago, so if the cycle's clock stopped reaching the satellite sleeve,
+    # AAPL would be bought again.
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, {"AAPL": linear_closes(100.0, 0.0, 5)})
+    r.core = None
+    # Sentiment freshness is checked in Storage against the real clock, so
+    # this row (written now) is fresh.
+    r.storage.log_sentiment(symbol="AAPL", source="test", score=0.9, article_count=10)
+    log_sell(r.storage, "sentiment", "AAPL")
+    sold_at = (FRIDAY_OPEN - timedelta(hours=1)).isoformat()
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        c.execute("UPDATE orders SET ts = ? WHERE sleeve = 'sentiment'", (sold_at,))
+
+    r._cycle()
+
+    buys = [o for o in r.storage.recent_orders() if o["action"] == "BUY"]
+    assert buys == []
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        events = [row[0] for row in c.execute("SELECT message FROM events")]
+    assert any("AAPL skip: reentry cooldown: 23.0h left" in m for m in events)
+
+
 def test_runner_passes_cooldown_to_sleeves(tmp_path, monkeypatch):
     import live.portfolio_runner as pr
 
