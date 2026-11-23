@@ -29,11 +29,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- The core weekday and once-per-day checks use the US Eastern date instead of UTC (#5).
-- `portfolio.reentry_cooldown_sec` is enforced for the core and sentiment sleeves (#6).
+- The core weekday and once-per-day checks use the US Eastern date instead of UTC, so the weekly rebalance runs on the first Friday cycle in Eastern time and no longer on Thursday evening (#5).
+- `portfolio.reentry_cooldown_sec` is enforced for the core and sentiment sleeves: a symbol a sleeve sold to 0 shares is not bought back by that sleeve for 24 hours. Top-ups and sells are never blocked (#6).
 - Satellite skip reasons have no leading space (#16).
 - The satellite no longer re-enters a symbol in the cycle it exits it (#17).
-- The core drift trigger respects the once-per-day rule (#18).
+- The core drift trigger respects the once-per-day rule, so the core sleeve rebalances at most once per US Eastern day (#18).
 - Docs and code now agree on one dashboard port (8765) and one broker port (5000, Client Portal Gateway). The README and the `dashboard/app.py` docstring no longer say 8080 or 8000, and the `assert_paper_mode` error no longer mentions the old 4002/7497 TWS ports (#2).
 - Remaining `bot/.env` references in code comments, error messages and docs now point at `.env` in the repo root.
 
