@@ -2,8 +2,10 @@
 Core sleeve — medium-term (1–3 month) macro+TA portfolio.
 
 Evaluation cadence: hourly cycles, but only ACTS on the configured rebalance
-day-of-week (Friday close by default) OR when any existing holding has
-drifted >drift_threshold from its target weight.
+day-of-week (Friday by default, judged by the US Eastern date, on the first
+eligible cycle of that day) OR when any existing holding has drifted
+>drift_threshold from its target weight. Every trigger fires at most once per
+Eastern date.
 
 Decision flow per evaluation:
   1. Score every asset in the universe (core.scoring.score_universe)
@@ -25,6 +27,7 @@ import pandas as pd
 
 from core.config import CoreSleeveConfig
 from core.macro import MacroSnapshot
+from core.market_hours import to_eastern
 from core.scoring import AssetScore, score_universe, select_holdings
 
 
@@ -76,29 +79,33 @@ class CoreSleeve:
     ) -> tuple[bool, str]:
         """
         Should we make a decision THIS cycle?
-        Triggers: (a) it's the configured rebalance day-of-week and we haven't
-        rebalanced today, OR (b) some holding has drifted past drift_threshold.
+        Dates are US Eastern. At most one evaluation per Eastern date, for every
+        trigger. Triggers: (a) it is the configured rebalance day-of-week (the
+        first eligible cycle of that day fires), OR (b) some holding has drifted
+        past drift_threshold.
         """
         now = now or datetime.now(timezone.utc)
+        now_et = to_eastern(now)
+        last_et = to_eastern(last_rebalance_ts) if last_rebalance_ts is not None else None
 
-        # Drift check — always evaluate if anything is off-target
+        # Once per Eastern date, whatever the trigger (checked before drift)
+        if last_et is not None and last_et.date() == now_et.date():
+            return False, "already rebalanced today"
+
+        # Drift check: evaluate if anything is off-target
         drift = self._max_drift(current_holdings, prices, sleeve_equity)
         if drift is not None and drift[1] > self.cfg.drift_threshold:
             sym, mag = drift
             return True, f"drift: {sym} off by {mag:.1%} (>{self.cfg.drift_threshold:.0%})"
 
         # Calendar trigger
-        if now.weekday() != self.cfg.rebalance_day_of_week:
+        if now_et.weekday() != self.cfg.rebalance_day_of_week:
             return (
                 False,
-                f"not rebalance day (today={now.strftime('%a')}, want={_day_name(self.cfg.rebalance_day_of_week)})",
+                f"not rebalance day (today={now_et.strftime('%a')}, want={_day_name(self.cfg.rebalance_day_of_week)})",
             )
 
-        # Don't rebalance more than once per calendar day
-        if last_rebalance_ts is not None and last_rebalance_ts.date() == now.date():
-            return False, "already rebalanced today"
-
-        return True, f"calendar: {_day_name(self.cfg.rebalance_day_of_week)} close"
+        return True, f"calendar: {_day_name(self.cfg.rebalance_day_of_week)}"
 
     def _max_drift(
         self,
