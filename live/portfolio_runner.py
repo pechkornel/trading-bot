@@ -30,7 +30,7 @@ import signal
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -90,8 +90,17 @@ class PortfolioRunner:
         self.interval = interval_override or self.portfolio_cfg.cycle_interval_sec
 
         self.storage = Storage()
-        self.core = CoreSleeve(self.core_cfg) if self.core_cfg.enabled else None
-        self.satellite = SentimentSatelliteSleeve(self.sent_cfg) if self.sent_cfg.enabled else None
+        cooldown = self.portfolio_cfg.reentry_cooldown_sec
+        self.core = (
+            CoreSleeve(self.core_cfg, reentry_cooldown_sec=cooldown)
+            if self.core_cfg.enabled
+            else None
+        )
+        self.satellite = (
+            SentimentSatelliteSleeve(self.sent_cfg, reentry_cooldown_sec=cooldown)
+            if self.sent_cfg.enabled
+            else None
+        )
         self.macro_fetcher = MacroFetcher(self.macro_cfg)
         self.sentiment_cfg: SentimentConfig = load_sentiment_config()
 
@@ -203,7 +212,8 @@ class PortfolioRunner:
 
         cycle_id = uuid.uuid4().hex[:12]
         total_equity = self.portfolio_cfg.starting_equity
-        ms = market_state()
+        now = datetime.now(timezone.utc)  # one clock for the whole cycle
+        ms = market_state(now)
 
         # Log market state once per cycle so the dashboard timeline shows it
         if ms.regime == MarketRegime.OPEN:
@@ -221,13 +231,13 @@ class PortfolioRunner:
         # Runs even when market is closed: time-based exits keep firing, and the
         # plan can be logged even if execution waits for the next open.
         if self.satellite is not None:
-            self._cycle_satellite(cycle_id, total_equity, ms)
+            self._cycle_satellite(cycle_id, total_equity, ms, now)
 
         # ----- Core sleeve -----
         # Evaluated in OPEN and AFTER_CLOSE cycles (never WEEKEND or PRE_OPEN).
         # The sleeve decides: rebalance weekday, or drift.
         if self.core is not None:
-            self._cycle_core(cycle_id, total_equity, ms)
+            self._cycle_core(cycle_id, total_equity, ms, now)
 
         if not (self.core or self.satellite):
             self.storage.log_event(
@@ -236,7 +246,7 @@ class PortfolioRunner:
 
     # ---- core sleeve ----
 
-    def _cycle_core(self, cycle_id: str, total_equity: float, ms) -> None:
+    def _cycle_core(self, cycle_id: str, total_equity: float, ms, now: datetime) -> None:
         assert self.client is not None and self.core is not None
         sleeve_equity = total_equity * self.core_cfg.allocation_pct
 
@@ -270,6 +280,7 @@ class PortfolioRunner:
             current_holdings=holdings,
             prices=latest_prices,
             sleeve_equity=sleeve_equity,
+            now=now,
         )
         if not should:
             self.storage.log_event("info", "core", f"cycle={cycle_id} skip ({why})")
@@ -304,6 +315,8 @@ class PortfolioRunner:
             current_holdings=holdings,
             sleeve_equity=sleeve_equity,
             reason=why,
+            last_exit_ts=self.storage.last_exit_times("core"),
+            now=now,
         )
 
         # Log every decision so the dashboard shows the full ranking
@@ -446,7 +459,7 @@ class PortfolioRunner:
 
     # ---- sentiment satellite ----
 
-    def _cycle_satellite(self, cycle_id: str, total_equity: float, ms) -> None:
+    def _cycle_satellite(self, cycle_id: str, total_equity: float, ms, now: datetime) -> None:
         assert self.client is not None and self.satellite is not None
         sleeve_equity = total_equity * self.sent_cfg.allocation_pct
         allow_entries = should_run_entries(ms)
@@ -495,6 +508,8 @@ class PortfolioRunner:
             sleeve_equity=sleeve_equity,
             allow_entries=allow_entries,
             allow_exits=allow_exits,
+            now=now,
+            last_exit_ts=self.storage.last_exit_times("sentiment"),
         )
 
         # Log every decision (entries + exits + skips) so the dashboard tells the full story
