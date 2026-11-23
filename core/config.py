@@ -87,7 +87,7 @@ class PortfolioConfig:
 
     starting_equity: float = 100_000.0
     cycle_interval_sec: int = 60
-    reentry_cooldown_sec: int = 600
+    reentry_cooldown_sec: int = 86400
 
 
 @dataclass

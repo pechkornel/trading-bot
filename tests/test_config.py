@@ -1,6 +1,13 @@
 import pytest
 
-from core.config import AppConfig, IBConfig, assert_paper_mode, load_app_config
+from core.config import (
+    AppConfig,
+    IBConfig,
+    PortfolioConfig,
+    assert_paper_mode,
+    load_app_config,
+    load_portfolio,
+)
 
 
 def test_env_ib_port_5000_passes_paper_lock(monkeypatch):
@@ -78,3 +85,11 @@ def test_port_5001_is_refused(monkeypatch):
     monkeypatch.setenv("IB_PORT", "5001")
     with pytest.raises(RuntimeError, match="IB_PORT=5001 is not a paper port"):
         assert_paper_mode(load_app_config())
+
+
+def test_portfolio_config_default_cooldown_matches_yaml():
+    assert PortfolioConfig().reentry_cooldown_sec == 86400
+
+
+def test_loaded_portfolio_cooldown_is_one_day():
+    assert load_portfolio().reentry_cooldown_sec == 86400
