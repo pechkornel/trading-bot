@@ -73,22 +73,50 @@ def test_weights_not_summing_to_one_raise():
 
 
 def test_friday_without_prior_rebalance_triggers():
-    assert check(FRIDAY) == (True, "calendar: Fri close")
+    assert check(FRIDAY) == (True, "calendar: Fri")
 
 
 def test_same_day_rebalance_is_not_repeated():
     assert check(FRIDAY, last=FRIDAY) == (False, "already rebalanced today")
 
 
-def test_earlier_rebalance_on_the_same_utc_date_blocks_a_repeat():
-    # Hourly cycles: the last rebalance was hours earlier on the same UTC date.
-    earlier = FRIDAY - timedelta(hours=11)  # 01:00 UTC, same date
-    assert check(FRIDAY, last=earlier) == (False, "already rebalanced today")
+def test_earlier_rebalance_on_the_same_eastern_date_blocks_a_repeat():
+    # Hourly cycles: both times are Friday in Eastern time (09:30 and 15:00 EST).
+    last = datetime(2026, 11, 13, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 13, 20, 0, tzinfo=timezone.utc)
+    assert check(now, last=last) == (False, "already rebalanced today")
 
 
-def test_rebalance_on_the_previous_utc_date_does_not_block():
+def test_rebalance_on_the_previous_eastern_date_does_not_block():
     previous_week = FRIDAY - timedelta(days=7)
-    assert check(FRIDAY, last=previous_week) == (True, "calendar: Fri close")
+    assert check(FRIDAY, last=previous_week) == (True, "calendar: Fri")
+
+
+def test_thursday_evening_eastern_is_not_a_rebalance_day():
+    now = datetime(2026, 11, 13, 1, 0, tzinfo=timezone.utc)  # Thu 20:00 EST
+    assert check(now) == (False, "not rebalance day (today=Thu, want=Fri)")
+
+
+def test_thursday_evening_eastern_in_summer_is_not_a_rebalance_day():
+    now = datetime(2026, 6, 12, 0, 30, tzinfo=timezone.utc)  # Thu 20:30 EDT
+    assert check(now) == (False, "not rebalance day (today=Thu, want=Fri)")
+
+
+def test_friday_evening_eastern_is_a_rebalance_day():
+    now = datetime(2026, 11, 14, 2, 0, tzinfo=timezone.utc)  # Fri 21:00 EST
+    assert check(now) == (True, "calendar: Fri")
+
+
+def test_same_eastern_date_blocks_a_repeat_across_utc_midnight():
+    last = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)  # Fri 10:00 EST
+    now = datetime(2026, 11, 14, 2, 0, tzinfo=timezone.utc)  # Fri 21:00 EST
+    assert check(now, last=last) == (False, "already rebalanced today")
+
+
+def test_rebalance_on_previous_eastern_date_does_not_block_across_utc_date():
+    last = datetime(2026, 11, 13, 1, 0, tzinfo=timezone.utc)  # Thu 20:00 EST
+    now = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)  # Fri 10:00 EST
+    assert check(now, last=last) == (True, "calendar: Fri")
 
 
 def test_wednesday_is_not_a_rebalance_day():
@@ -101,6 +129,26 @@ def test_wednesday_is_not_a_rebalance_day():
 def test_drift_triggers_on_a_non_rebalance_day():
     ok, reason = check(
         WEDNESDAY,
+        holdings={"SPY": 60, "TLT": 40},
+        prices={"SPY": 100.0, "TLT": 100.0},
+    )
+    assert ok is True
+    assert reason.startswith("drift: ")
+
+
+def test_drift_does_not_rebalance_twice_on_the_same_eastern_date():
+    assert check(
+        WEDNESDAY,
+        last=WEDNESDAY - timedelta(hours=2),
+        holdings={"SPY": 60, "TLT": 40},
+        prices={"SPY": 100.0, "TLT": 100.0},
+    ) == (False, "already rebalanced today")
+
+
+def test_drift_triggers_after_a_rebalance_on_the_previous_eastern_date():
+    ok, reason = check(
+        WEDNESDAY,
+        last=WEDNESDAY - timedelta(days=1),
         holdings={"SPY": 60, "TLT": 40},
         prices={"SPY": 100.0, "TLT": 100.0},
     )
