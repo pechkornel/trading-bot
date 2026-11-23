@@ -19,7 +19,8 @@ Decision flow per cycle (only runs when market state permits):
                 and we're under max_concurrent, open a position sized at
                 position_pct_of_sleeve. A symbol that exits this cycle is
                 never re-entered in it; its freed slot goes to the next
-                candidate.
+                candidate. A symbol whose last exit is within
+                reentry_cooldown_sec is skipped without using a slot.
 
 Returns plans the runner executes (so this module stays I/O-free).
 """
@@ -31,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 from core.config import SentimentSatelliteConfig
+from core.sleeves.cooldown import cooldown_remaining, format_cooldown
 
 
 @dataclass
@@ -81,8 +83,9 @@ class SatelliteCycleResult:
 class SentimentSatelliteSleeve:
     name = "sentiment"
 
-    def __init__(self, cfg: SentimentSatelliteConfig) -> None:
+    def __init__(self, cfg: SentimentSatelliteConfig, reentry_cooldown_sec: int = 0) -> None:
         self.cfg = cfg
+        self.reentry_cooldown_sec = reentry_cooldown_sec
 
     def evaluate(
         self,
@@ -93,14 +96,18 @@ class SentimentSatelliteSleeve:
         now: datetime | None = None,
         allow_entries: bool = True,
         allow_exits: bool = True,
+        last_exit_ts: Mapping[str, datetime] | None = None,
     ) -> SatelliteCycleResult:
         """
         Decide what to enter / exit this cycle.
 
         `inputs` is symbol → SentimentInput for the satellite universe.
         `positions` is symbol → currently-held Position (only positions for THIS sleeve).
+        `last_exit_ts` maps symbol to its last exit time in this sleeve; with
+        reentry_cooldown_sec it blocks re-entry.
         """
         now = now or datetime.now(timezone.utc)
+        last_exit_ts = last_exit_ts or {}
         entries: list[SatelliteEntry] = []
         exits: list[SatelliteExit] = []
         skipped: list[tuple[str, str]] = []
@@ -142,6 +149,10 @@ class SentimentSatelliteSleeve:
                     continue
                 if sym in exited:
                     skipped.append((sym, "exited this cycle"))
+                    continue
+                left = cooldown_remaining(last_exit_ts.get(sym), now, self.reentry_cooldown_sec)
+                if left is not None:
+                    skipped.append((sym, format_cooldown(left)))
                     continue
                 reason_or_skip = self._entry_check(sym, inp)
                 if reason_or_skip.startswith("skip:"):
