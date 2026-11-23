@@ -100,10 +100,11 @@ universe:
 portfolio:
   starting_equity: 100000.0
   cycle_interval_sec: 3600               # one decision cycle per hour
-                                         # (core only acts on Friday close;
+                                         # (core acts at most once per US Eastern day:
+                                         #  on Friday or on drift;
                                          #  sentiment satellite acts daily;
                                          #  most cycles will be no-ops)
-  reentry_cooldown_sec: 86400            # 1 day between same-symbol entries
+  reentry_cooldown_sec: 86400            # min seconds between selling a symbol to 0 and buying it back, per sleeve
 
 sleeves:
   core:
@@ -126,7 +127,7 @@ sleeves:
     risk_off_vix_threshold: 25.0
     risk_off_universe: [TLT, IEF]        # what to hold when risk-off triggers
     # Rebalance triggers
-    rebalance_day_of_week: 4             # 0=Mon, 4=Fri (Friday close eval)
+    rebalance_day_of_week: 4             # 0=Mon, 4=Fri (US Eastern weekday)
     drift_threshold: 0.08                # rebalance if any holding drifts >8%
 
   sentiment:

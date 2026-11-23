@@ -2,7 +2,7 @@
 
 How the bot decides what to do, as it is in `config/symbols.yaml` and the code today. Top down: portfolio split, cycle and market hours, then one section per sleeve, then risk controls, known gaps and where to change things.
 
-This file describes what the code does, including behaviour that looks like a bug. Those cases are listed in section 8 and are not fixed here.
+This file describes what the code does, including behaviour that looks like a bug. Those cases are listed in section 8.
 
 The bot is paper-trading only. Orders are sent only when a runner is started with `--live`.
 
@@ -39,7 +39,7 @@ An older sleeve (`core/sleeves/long_term.py`, `LongTermSleeveConfig`) still exis
 
 ## 2. Cycle and market hours
 
-`live/portfolio_runner.py` runs one cycle every `portfolio.cycle_interval_sec` (3600 seconds). Each cycle runs the satellite first, then the core sleeve. Most cycles do nothing.
+`live/portfolio_runner.py` runs one cycle every `portfolio.cycle_interval_sec` (3600 seconds). Each cycle runs the satellite first, then the core sleeve. Most cycles do nothing. The runner reads the clock once per cycle and passes that same time to the market state, the satellite and the core sleeve.
 
 `core/market_hours.py` sorts the current time into a regime, in US Eastern time:
 
@@ -127,7 +127,11 @@ Otherwise the target is an equal weight across the top `hold_top_n` (4) assets b
 
 ## 4. Core sleeve triggers and orders
 
-`CoreSleeve.should_evaluate` in `core/sleeves/core.py` decides if this cycle does a rebalance. It checks the drift trigger first, then the calendar trigger.
+`CoreSleeve.should_evaluate` in `core/sleeves/core.py` decides if this cycle does a rebalance. It checks once per day first, then the drift trigger, then the calendar trigger. All dates and weekdays are US Eastern (`to_eastern` from `core/market_hours.py`).
+
+### Once per day
+
+The sleeve never evaluates twice on the same Eastern date, whatever the trigger. If the last `rebalances` row for `core` has today's Eastern date, `should_evaluate` returns `already rebalanced today`. This check runs before drift.
 
 ### Drift trigger
 
@@ -135,9 +139,11 @@ With N held symbols (shares above 0), each symbol's target weight is taken as 1/
 
 ### Calendar trigger
 
-The sleeve evaluates when the UTC weekday of the current time equals `rebalance_day_of_week` (4, Friday) and no rebalance was logged on the same UTC date (`last_rebalance` in the `rebalances` table).
+The sleeve evaluates when the Eastern weekday equals `rebalance_day_of_week` (4, Friday). It fires on the first eligible cycle of that day, in `OPEN` or `AFTER_CLOSE` (the runner skips `PRE_OPEN` and `WEEKEND`). It does not wait for the 16:00 close. The reason string is `calendar: Fri`. On other days the reason is `not rebalance day (today=Thu, want=Fri)`.
 
-This is a UTC weekday, but the runner gates on Eastern regimes. Because of that, the trigger does not fire at Friday close as the YAML comment says. See section 8.
+### Re-entry cooldown
+
+A symbol that core sold down to 0 shares is not bought back for `portfolio.reentry_cooldown_sec` (86400, 24 hours). The runner passes `last_exit_times("core")` to `CoreSleeve.evaluate`. A blocked buy back becomes a hold with 0 target shares and the reason `reentry cooldown: 23.0h left`. Its weight stays in cash and is not spread over the other targets. Top-ups of symbols already held and all sells are not blocked. A partial sell does not start the cooldown.
 
 ### What an evaluation does
 
@@ -155,6 +161,8 @@ delta_shares  = target_shares - current_shares
 5. There is no stop-loss or take-profit on core positions.
 
 Every evaluation writes one row to `rebalances` and one row per symbol to `targets`. Every order goes into the `orders` table with `sleeve='core'`. After an order, the holding is set to `target_shares`. A symbol sold down to 0 stays in `holdings` with 0 shares.
+
+The cooldown is derived from the `orders` table, not from a new column. `Storage.last_exit_times(sleeve)` returns the latest SELL per symbol with status `logged` (dry run) or `placed` (live), so a dry run enforces the cooldown the same way. Failed orders do not count.
 
 ---
 
@@ -196,7 +204,11 @@ Candidates are the universe symbols, sorted by sentiment score from highest to l
 - `abs(score)` is below `sentiment_threshold` (0.4), so a score of exactly 0.4 enters,
 - `article_count` is below `min_article_count` (5),
 - the score is negative and `longs_only` is true,
+- it exited in this cycle (an exit is never re-entered within its own cycle, even with a cooldown of 0),
+- this sleeve sold it less than `portfolio.reentry_cooldown_sec` (86400) ago (the reason reads `reentry cooldown: 23.0h left`),
 - the price is 0 or missing, or the position rounds to 0 shares.
+
+Each skip is written to the events log as `<symbol> skip: <reason>`. Reasons have no leading space, for example `skip: no fresh sentiment`.
 
 At most `max_concurrent_positions` (4) positions are open at once, counted after the exits of this cycle.
 
@@ -280,7 +292,9 @@ Defaults from `core/config.py` are `rr_ratio = 4.0` and `atr_multiplier = 2.0`. 
 | Dry run by default | `live/portfolio_runner.py`, `live/runner.py` | Orders are only logged. `--live` is needed to send them, and it still goes to the paper account. |
 | Risk-off filter | Core scoring | SPY below its 200 day average and VIX above 25 moves the core target to TLT and IEF. |
 | Top N, equal weight | Core selection | At most 4 assets, 25% of the sleeve each (50% each in risk-off). |
+| Once per day | Core trigger | At most one core evaluation per US Eastern date, for the calendar and drift triggers alike. |
 | Drift threshold | Core trigger | Off-cycle rebalance only when a holding is more than 8 points from 1/N. |
+| Re-entry cooldown | Both active sleeves | No buy back of a symbol within 24 hours of selling it to 0, per sleeve. Derived from the `orders` table. |
 | Sentiment threshold | Satellite entry | `abs(score)` of at least 0.4. |
 | Article minimum | Satellite entry | At least 5 ticker mentions. |
 | Longs only | Satellite entry | Negative scores never open a position. |
@@ -297,14 +311,10 @@ Defaults from `core/config.py` are `rr_ratio = 4.0` and `atr_multiplier = 2.0`. 
 
 These are places where the code does not match the intent in the YAML, or where a feature is missing. This file documents the current behaviour.
 
-- **UTC weekday versus Eastern regime in the core calendar trigger.** `should_evaluate` uses the UTC weekday, while the runner gates on Eastern regimes. With hourly cycles the trigger fires on Thursday evening Eastern time (once UTC is already Friday, from 20:00 EDT or 19:00 EST) or during the Friday session. It does not fire at Friday close. `is_core_rebalance_window` only avoids the `WEEKEND` and `PRE_OPEN` skip, so in practice it has no effect.
-- **`reentry_cooldown_sec` is not enforced.** `portfolio.reentry_cooldown_sec` (86400) is read into `PortfolioConfig` and shown on the dashboard control page, but no runner uses it.
 - **Satellite hold timer counts calendar days.** The YAML comment says trading days. The code uses `(now - opened_at).days`.
 - **The tactical sleeve is not wired into the portfolio runner.** `TacticalSleeve`, `fuse` and `size_portfolio` are not called by any runner. `live/runner.py` uses a fixed quantity and no fusion.
 - **Static starting equity.** Sleeve budgets come from `portfolio.starting_equity`, not from the live account value.
 - **No holiday calendar and approximate daylight saving time.** NYSE holidays and early closes are not known, and the Eastern offset changes by date only.
-- **A satellite position that exits on the timer or the stop can be re-entered in the same cycle.** Exits free the slot and the symbol before entries are evaluated, so a symbol with strong sentiment can be sold and bought again in one cycle.
-- **A drift trigger bypasses the once-per-day check.** The drift check runs before the check on the last rebalance, so the core sleeve can rebalance in several cycles of the same day if drift stays above the threshold.
 
 Smaller code notes:
 
@@ -329,6 +339,7 @@ Most settings are in `config/symbols.yaml`.
 | Change lookbacks | `sleeves.core.momentum_lookback_days`, `trend_ma_days` |
 | Change the risk-off filter | `sleeves.core.risk_off_spy_ma_days`, `risk_off_vix_threshold`, `risk_off_universe` |
 | Change core rebalance triggers | `sleeves.core.rebalance_day_of_week`, `drift_threshold` |
+| Change the re-entry cooldown | `portfolio.reentry_cooldown_sec` |
 | Change macro series or cache time | `macro.fred_series`, `macro.yf_tickers`, `macro.cache_ttl_sec` |
 | Change the macro rules | `_macro_score` in `core/scoring.py` |
 | Change satellite entry rules | `sleeves.sentiment.sentiment_threshold`, `min_article_count`, `max_concurrent_positions`, `longs_only` |
