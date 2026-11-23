@@ -12,8 +12,11 @@ from core.sleeves.sentiment_satellite import (
 NOW = datetime(2026, 11, 13, 12, tzinfo=timezone.utc)
 
 
-def make_sleeve(**overrides) -> SentimentSatelliteSleeve:
-    return SentimentSatelliteSleeve(SentimentSatelliteConfig(enabled=True, **overrides))
+def make_sleeve(reentry_cooldown_sec=0, **overrides) -> SentimentSatelliteSleeve:
+    return SentimentSatelliteSleeve(
+        SentimentSatelliteConfig(enabled=True, **overrides),
+        reentry_cooldown_sec=reentry_cooldown_sec,
+    )
 
 
 def inp(symbol="AAPL", score=0.6, count=6, price=100.0) -> SentimentInput:
@@ -35,8 +38,8 @@ def pos(symbol="AAPL", shares=10, entry=100.0, age_days=1) -> Position:
     )
 
 
-def run(inputs, positions=None, equity=20_000.0, **kwargs):
-    return make_sleeve().evaluate(
+def run(inputs, positions=None, equity=20_000.0, sleeve=None, **kwargs):
+    return (sleeve or make_sleeve()).evaluate(
         inputs={i.symbol: i for i in inputs},
         positions=positions or {},
         sleeve_equity=equity,
@@ -216,3 +219,56 @@ def test_freed_slot_goes_to_another_candidate():
     result = run([inp("SPY", score=0.95), inp("NVDA", score=0.9)], positions=held)
     assert [e.symbol for e in result.exits] == ["SPY"]
     assert [e.symbol for e in result.entries] == ["NVDA"]
+
+
+# ---- re-entry cooldown ----
+
+DAY = 86400
+
+
+def test_recent_exit_blocks_reentry():
+    result = run(
+        [inp("AAPL", score=0.9)],
+        sleeve=make_sleeve(reentry_cooldown_sec=DAY),
+        last_exit_ts={"AAPL": NOW - timedelta(hours=1)},
+    )
+    assert result.entries == []
+    assert ("AAPL", "reentry cooldown: 23.0h left") in result.skipped
+
+
+def test_reentry_allowed_at_exactly_the_cooldown():
+    result = run(
+        [inp("AAPL", score=0.9)],
+        sleeve=make_sleeve(reentry_cooldown_sec=DAY),
+        last_exit_ts={"AAPL": NOW - timedelta(seconds=DAY)},
+    )
+    assert [e.symbol for e in result.entries] == ["AAPL"]
+
+
+def test_zero_cooldown_allows_reentry_after_an_earlier_exit():
+    result = run(
+        [inp("AAPL", score=0.9)],
+        sleeve=make_sleeve(reentry_cooldown_sec=0),
+        last_exit_ts={"AAPL": NOW - timedelta(hours=1)},
+    )
+    assert [e.symbol for e in result.entries] == ["AAPL"]
+
+
+def test_naive_exit_time_is_treated_as_utc():
+    naive = (NOW - timedelta(hours=1)).replace(tzinfo=None)
+    result = run(
+        [inp("AAPL", score=0.9)],
+        sleeve=make_sleeve(reentry_cooldown_sec=DAY),
+        last_exit_ts={"AAPL": naive},
+    )
+    assert result.entries == []
+    assert ("AAPL", "reentry cooldown: 23.0h left") in result.skipped
+
+
+def test_cooldown_block_does_not_use_a_slot():
+    result = run(
+        [inp("AAPL", score=0.9), inp("MSFT", score=0.8)],
+        sleeve=make_sleeve(reentry_cooldown_sec=DAY, max_concurrent_positions=1),
+        last_exit_ts={"AAPL": NOW - timedelta(hours=1)},
+    )
+    assert [e.symbol for e in result.entries] == ["MSFT"]
