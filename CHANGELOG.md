@@ -12,12 +12,14 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (123 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (166 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI (#4).
 
 ### Changed
 
+- The core calendar trigger reason is now `calendar: Fri` instead of `calendar: Fri close`, because it fires on the first Friday cycle in Eastern time, not at the close (#5). Anything that matches the old string in `targets.reason` or the events log must be updated.
+- The `PortfolioConfig.reentry_cooldown_sec` default is now 86400 (was 600), matching `config/symbols.yaml` (#6).
 - The codebase is formatted with ruff. Imports are sorted and unused imports are removed (#4).
 - `docs/TRADING_LOGIC.md` is rewritten to match the code: core sleeve (70%), sentiment satellite (20%) and the disabled tactical sleeve. It has a Known gaps section (#4).
 - The documented install root is now `/opt/trading-bot` (the repo root, no `bot/` subfolder) in the deploy docs, all four systemd units and `deploy/backup.sh` (#2).
@@ -27,5 +29,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The core weekday and once-per-day checks use the US Eastern date instead of UTC (#5).
+- `portfolio.reentry_cooldown_sec` is enforced for the core and sentiment sleeves (#6).
+- Satellite skip reasons have no leading space (#16).
+- The satellite no longer re-enters a symbol in the cycle it exits it (#17).
+- The core drift trigger respects the once-per-day rule (#18).
 - Docs and code now agree on one dashboard port (8765) and one broker port (5000, Client Portal Gateway). The README and the `dashboard/app.py` docstring no longer say 8080 or 8000, and the `assert_paper_mode` error no longer mentions the old 4002/7497 TWS ports (#2).
 - Remaining `bot/.env` references in code comments, error messages and docs now point at `.env` in the repo root.
+
+### Removed
+
+- `core.market_hours.is_core_rebalance_window` (it had no effect) (#5).
