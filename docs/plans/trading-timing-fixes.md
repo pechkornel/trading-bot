@@ -122,7 +122,9 @@ Existing `logs/bot.sqlite` files work unchanged: the `orders` table and its colu
 Shared helper (keeps both sleeves consistent): new module `core/sleeves/cooldown.py`:
 
 ```python
-def cooldown_remaining(exit_ts: datetime | None, now: datetime, cooldown_sec: int) -> timedelta | None:
+def cooldown_remaining(
+    exit_ts: datetime | None, now: datetime, cooldown_sec: int
+) -> timedelta | None:
     """Time left before a symbol exited at exit_ts may be bought again, or None if free."""
 ```
 
