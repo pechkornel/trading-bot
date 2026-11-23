@@ -14,9 +14,12 @@ Decision flow per cycle (only runs when market state permits):
                 gets closed (or queued for next open if market is closed).
 
   ENTRIES next — for each universe symbol:
-                if no open position, sentiment.score > threshold,
-                article_count >= min, and we're under max_concurrent,
-                open a position sized at position_pct_of_sleeve.
+                if no open position, the symbol did not exit in this same
+                cycle, sentiment.score > threshold, article_count >= min,
+                and we're under max_concurrent, open a position sized at
+                position_pct_of_sleeve. A symbol that exits this cycle is
+                never re-entered in it; its freed slot goes to the next
+                candidate.
 
 Returns plans the runner executes (so this module stays I/O-free).
 """
@@ -119,9 +122,8 @@ class SentimentSatelliteSleeve:
                     )
 
         # Recompute available slots after exits
-        remaining_positions = {
-            s: p for s, p in positions.items() if not any(e.symbol == s for e in exits)
-        }
+        exited = {e.symbol for e in exits}
+        remaining_positions = {s: p for s, p in positions.items() if s not in exited}
         open_slots = self.cfg.max_concurrent_positions - len(remaining_positions)
 
         # ---- ENTRIES ----
@@ -137,6 +139,9 @@ class SentimentSatelliteSleeve:
                     break
                 if sym in remaining_positions:
                     skipped.append((sym, "already holding"))
+                    continue
+                if sym in exited:
+                    skipped.append((sym, "exited this cycle"))
                     continue
                 reason_or_skip = self._entry_check(sym, inp)
                 if reason_or_skip.startswith("skip:"):

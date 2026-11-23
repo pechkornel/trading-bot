@@ -188,3 +188,31 @@ def test_exit_frees_a_slot_for_one_new_entry():
 def test_allow_exits_false_blocks_exits():
     result = run([inp(score=0.0)], positions={"AAPL": pos(age_days=10)}, allow_exits=False)
     assert result.exits == []
+
+
+# ---- no same-cycle re-entry ----
+
+
+def test_timer_exit_is_not_reentered_in_the_same_cycle():
+    result = run([inp("AAPL", score=0.9)], positions={"AAPL": pos(age_days=10)})
+    assert [e.symbol for e in result.exits] == ["AAPL"]
+    assert result.entries == []
+    assert ("AAPL", "exited this cycle") in result.skipped
+
+
+def test_stop_exit_is_not_reentered_in_the_same_cycle():
+    result = run(
+        [inp("AAPL", score=0.9, price=95.0)],
+        positions={"AAPL": pos(entry=100.0)},
+    )
+    assert [e.symbol for e in result.exits] == ["AAPL"]
+    assert result.entries == []
+    assert ("AAPL", "exited this cycle") in result.skipped
+
+
+def test_freed_slot_goes_to_another_candidate():
+    held = {s: pos(s) for s in ("SPY", "QQQ", "AAPL", "MSFT")}
+    held["SPY"] = pos("SPY", age_days=10)
+    result = run([inp("SPY", score=0.95), inp("NVDA", score=0.9)], positions=held)
+    assert [e.symbol for e in result.exits] == ["SPY"]
+    assert [e.symbol for e in result.entries] == ["NVDA"]
