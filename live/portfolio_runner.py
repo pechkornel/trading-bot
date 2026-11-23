@@ -13,7 +13,8 @@ Disabled sleeves (preserved in code, flip `enabled: true` to re-add):
 Cadence:
   - Outer loop ticks every `portfolio.cycle_interval_sec` (default 1h).
   - Each enabled sleeve decides whether to act this cycle. Most cycles are
-    no-ops (core only acts on Fri close or on drift; sentiment only acts
+    no-ops (core acts at most once per US Eastern day, on the rebalance
+    weekday or on drift; sentiment only acts
     when a news threshold trips). That's by design — medium-term ≠ active.
 
 Usage:
@@ -52,7 +53,6 @@ from core.indicators import capitalize_columns
 from core.macro import MacroFetcher
 from core.market_hours import (
     MarketRegime,
-    is_core_rebalance_window,
     market_state,
     should_run_entries,
     should_run_exits,
@@ -224,8 +224,8 @@ class PortfolioRunner:
             self._cycle_satellite(cycle_id, total_equity, ms)
 
         # ----- Core sleeve -----
-        # Only on the rebalance day after close (Fri 16:00–23:59 ET by default)
-        # OR if drift kicks in during market hours.
+        # Evaluated in OPEN and AFTER_CLOSE cycles (never WEEKEND or PRE_OPEN).
+        # The sleeve decides: rebalance weekday, or drift.
         if self.core is not None:
             self._cycle_core(cycle_id, total_equity, ms)
 
@@ -240,11 +240,9 @@ class PortfolioRunner:
         assert self.client is not None and self.core is not None
         sleeve_equity = total_equity * self.core_cfg.allocation_pct
 
-        # Market-hours gate: only act in the rebalance window (Fri after close)
-        # OR if existing positions have drifted (which can happen any time
-        # we have current prices, i.e. only during/after market hours).
-        in_rebalance_window = is_core_rebalance_window(ms, self.core_cfg.rebalance_day_of_week)
-        if not in_rebalance_window and ms.regime in (MarketRegime.WEEKEND, MarketRegime.PRE_OPEN):
+        # Market-hours gate: skip weekends and pre-open. Calendar and drift
+        # triggers are decided by the sleeve's should_evaluate.
+        if ms.regime in (MarketRegime.WEEKEND, MarketRegime.PRE_OPEN):
             self.storage.log_event(
                 "info",
                 "core",

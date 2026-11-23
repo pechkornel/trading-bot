@@ -4,8 +4,10 @@ US equity market hours awareness.
 Used by the portfolio runner to decide what to do per cycle:
   - DURING MARKET HOURS (Mon–Fri 09:30–16:00 ET):
       full evaluation — core scoring, sentiment entries, stops, exits
-  - AFTER CLOSE on the rebalance day (Fri 16:00–23:59 ET):
-      core sleeve evaluation only (works on the just-closed Friday prices)
+  - AFTER CLOSE (16:00-23:59 ET):
+      the runner still evaluates core (it works on the just-closed bars).
+      The core sleeve itself decides whether to act: at most once per day,
+      on its rebalance weekday or on drift. PRE_OPEN and weekends are skipped.
   - WEEKENDS / OTHER OFF-HOURS:
       time-based satellite exits only (the 10-day timer doesn't care if
       the market is open — but we won't try to PLACE the exit order until
@@ -156,16 +158,3 @@ def should_run_exits(state: MarketState) -> bool:
     exit ORDERS can be queued for the next open. Stops only meaningfully fire
     during market hours, but checking the flag at any time is cheap."""
     return True
-
-
-def is_core_rebalance_window(
-    state: MarketState,
-    rebalance_day_of_week: int = 4,
-) -> bool:
-    """
-    Core sleeve evaluates only on the configured rebalance day, AFTER close.
-
-    Default = Friday after 16:00 ET. That way the eval works on the
-    just-closed Friday bars, and orders queue for Monday open.
-    """
-    return state.weekday == rebalance_day_of_week and state.regime == MarketRegime.AFTER_CLOSE
