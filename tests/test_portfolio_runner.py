@@ -12,7 +12,7 @@ from core.config import (
     SentimentSatelliteConfig,
     SymbolConfig,
 )
-from core.market_hours import market_state
+from core.market_hours import market_state, to_eastern
 from core.sleeves.core import CoreSleeve
 from core.sleeves.sentiment_satellite import SentimentSatelliteSleeve
 from live.portfolio_runner import PortfolioRunner
@@ -102,6 +102,66 @@ def test_core_cycle_respects_cooldown(tmp_path):
     with sqlite3.connect(tmp_path / "bot.sqlite") as c:
         reasons = [row[0] for row in c.execute("SELECT reason FROM targets WHERE symbol = 'SPY'")]
     assert any("reentry cooldown" in x for x in reasons)
+
+
+def freeze_runner_clock(monkeypatch, frozen: datetime) -> None:
+    """Make `datetime.now()` inside live.portfolio_runner return `frozen`.
+
+    Only the runner module is patched. `market_state()` called without an
+    argument still reads the real clock, so a cycle that stops passing its
+    own `now` to it is caught.
+    """
+    import live.portfolio_runner as pr
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is not None else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(pr, "datetime", FrozenDatetime)
+    monkeypatch.setattr(pr, "read_session", lambda: None)
+
+
+def test_cycle_uses_one_clock_for_market_state_and_both_sleeves(tmp_path, monkeypatch):
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    seen = {}
+    r._cycle_satellite = lambda cid, eq, ms, now: seen.update(sat=(ms, now))
+    r._cycle_core = lambda cid, eq, ms, now: seen.update(core=(ms, now))
+
+    r._cycle()
+
+    sat_ms, sat_now = seen["sat"]
+    core_ms, core_now = seen["core"]
+    assert sat_now == core_now == FRIDAY_OPEN
+    assert sat_ms is core_ms
+    assert sat_ms.eastern_now == to_eastern(FRIDAY_OPEN)
+
+
+def test_cycle_runs_the_core_calendar_trigger_and_cooldown_on_its_own_clock(tmp_path, monkeypatch):
+    # The frozen clock is a Friday; the real clock usually is not. If _cycle
+    # stopped passing its clock down, the calendar trigger would not fire.
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    r.satellite = None
+    r.storage.upsert_holding(sleeve="core", symbol="SPY", shares=0.0, avg_cost=100.0)
+    log_sell(r.storage, "core", "SPY")
+    sold_at = (FRIDAY_OPEN - timedelta(hours=1)).isoformat()
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        c.execute("UPDATE orders SET ts = ? WHERE sleeve = 'core'", (sold_at,))
+    r.portfolio_cfg = PortfolioConfig(
+        starting_equity=10_000.0 / r.core_cfg.allocation_pct, reentry_cooldown_sec=DAY
+    )
+
+    r._cycle()
+
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        reasons = [row[0] for row in c.execute("SELECT reason FROM rebalances")]
+        spy = [row[0] for row in c.execute("SELECT reason FROM targets WHERE symbol = 'SPY'")]
+    assert any("calendar: Fri" in x for x in reasons)
+    assert any("reentry cooldown" in x for x in spy)
+    buys = [o for o in r.storage.recent_orders() if o["action"] == "BUY" and o["symbol"] == "SPY"]
+    assert buys == []
 
 
 def test_runner_passes_cooldown_to_sleeves(tmp_path, monkeypatch):
