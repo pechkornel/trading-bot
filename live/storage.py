@@ -390,6 +390,28 @@ class Storage:
             ).fetchone()
         return dict(row) if row else None
 
+    def last_exit_times(self, sleeve: str) -> dict[str, datetime]:
+        """Latest successful SELL time per symbol for a sleeve (tz-aware UTC).
+
+        Dry-run ('logged') and live ('placed') rows both count, like holdings.
+        Callers only apply this to symbols held at 0 shares, where the latest
+        successful SELL is the one that took the position to 0.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT symbol, MAX(ts) AS ts FROM orders "
+                "WHERE sleeve = ? AND action = 'SELL' AND status IN ('logged', 'placed') "
+                "GROUP BY symbol",
+                (sleeve,),
+            ).fetchall()
+        out: dict[str, datetime] = {}
+        for row in rows:
+            ts = datetime.fromisoformat(row["ts"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            out[row["symbol"]] = ts
+        return out
+
     def recent_target_cycles(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return the latest N cycles, each with its per-symbol targets nested."""
         with self._conn() as c:
