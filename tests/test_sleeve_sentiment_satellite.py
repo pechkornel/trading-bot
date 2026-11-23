@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from core.config import SentimentSatelliteConfig
 from core.sleeves.sentiment_satellite import (
     Position,
@@ -84,9 +86,18 @@ def test_bearish_is_skipped_with_longs_only():
 def test_missing_sentiment_is_skipped():
     result = run([inp(score=None)])
     assert result.entries == []
-    # Current behaviour: the "skip:" prefix is stripped with [5:], which leaves
-    # a leading space in the reason.
-    assert result.skipped == [("AAPL", " no fresh sentiment")]
+    assert result.skipped == [("AAPL", "no fresh sentiment")]
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [inp(score=None), inp(score=0.39), inp(count=4), inp(score=-0.8)],
+)
+def test_skip_reasons_have_no_surrounding_whitespace(candidate):
+    result = run([candidate])
+    assert result.skipped
+    for _, why in result.skipped:
+        assert why == why.strip()
 
 
 def test_symbol_outside_universe_is_ignored():

@@ -140,7 +140,7 @@ class SentimentSatelliteSleeve:
                     continue
                 reason_or_skip = self._entry_check(sym, inp)
                 if reason_or_skip.startswith("skip:"):
-                    skipped.append((sym, reason_or_skip[5:]))
+                    skipped.append((sym, reason_or_skip.removeprefix("skip:").strip()))
                     continue
 
                 # Size: position_pct_of_sleeve of sleeve_equity, floor to int shares
