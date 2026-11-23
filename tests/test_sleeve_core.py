@@ -238,3 +238,51 @@ def test_risk_off_moves_to_bond_bucket():
     assert decisions["IEF"].target_shares == 50
     assert decisions["IEF"].score is None
     assert decisions["TLT"].score is not None
+
+
+# ---- re-entry cooldown ----
+
+
+def cooldown_eval(holdings, last_exit_ts):
+    return by_symbol(
+        CoreSleeve(small_cfg(), reentry_cooldown_sec=86400).evaluate(
+            closes=ranked_closes(),
+            macro=make_macro(),
+            current_holdings=holdings,
+            sleeve_equity=10_000.0,
+            reason="test",
+            last_exit_ts=last_exit_ts,
+            now=FRIDAY,
+        )
+    )
+
+
+def test_recent_exit_blocks_core_buy_back():
+    d = cooldown_eval({"SPY": 0, "TLT": 50}, {"SPY": FRIDAY - timedelta(hours=1)})
+    assert d["SPY"].target_shares == 0
+    assert d["SPY"].delta_shares == 0
+    assert d["SPY"].target_weight == 0.0
+    assert d["SPY"].reason.startswith("reentry cooldown")
+    assert d["TLT"].target_shares == 50
+    assert d["TLT"].delta_shares == 0
+
+
+def test_cooldown_applies_without_a_holdings_row():
+    d = cooldown_eval({"TLT": 50}, {"SPY": FRIDAY - timedelta(hours=1)})
+    assert d["SPY"].delta_shares == 0
+    assert d["SPY"].reason.startswith("reentry cooldown")
+
+
+def test_held_symbol_top_up_is_not_blocked():
+    d = cooldown_eval({"SPY": 30, "TLT": 50}, {"SPY": FRIDAY - timedelta(hours=1)})
+    assert d["SPY"].delta_shares == 20
+
+
+def test_core_buy_back_allowed_after_cooldown():
+    d = cooldown_eval({"SPY": 0, "TLT": 50}, {"SPY": FRIDAY - timedelta(days=2)})
+    assert d["SPY"].delta_shares == 50
+
+
+def test_sells_are_never_blocked():
+    d = cooldown_eval({"GLD": 30}, {"GLD": FRIDAY - timedelta(hours=1)})
+    assert d["GLD"].delta_shares == -30

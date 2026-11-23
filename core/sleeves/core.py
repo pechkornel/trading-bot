@@ -11,7 +11,11 @@ Decision flow per evaluation:
   1. Score every asset in the universe (core.scoring.score_universe)
   2. If risk-off filter triggered → target = equal-weight in risk_off_universe
      Otherwise → target = equal-weight top hold_top_n by composite score
-  3. Compare to current holdings; emit BUY/SELL deltas to reach target
+  3. Compare to current holdings; emit BUY/SELL deltas to reach target.
+     A buy back (BUY of a symbol held at 0 shares) is blocked while the
+     symbol's last exit is within reentry_cooldown_sec: the decision becomes
+     a 0-delta hold with reason "reentry cooldown: ..." and its weight stays
+     in cash. Top-ups of held symbols and sells are never blocked.
 
 The sleeve does NOT fetch data — the runner does. It receives a closes-dict
 + MacroSnapshot + current holdings and returns a rebalance plan.
@@ -29,6 +33,7 @@ from core.config import CoreSleeveConfig
 from core.macro import MacroSnapshot
 from core.market_hours import to_eastern
 from core.scoring import AssetScore, score_universe, select_holdings
+from core.sleeves.cooldown import cooldown_remaining, format_cooldown
 
 
 @dataclass
@@ -58,8 +63,9 @@ class CoreCycleResult:
 class CoreSleeve:
     name = "core"
 
-    def __init__(self, cfg: CoreSleeveConfig) -> None:
+    def __init__(self, cfg: CoreSleeveConfig, reentry_cooldown_sec: int = 0) -> None:
         self.cfg = cfg
+        self.reentry_cooldown_sec = reentry_cooldown_sec
         if abs(cfg.momentum_weight + cfg.macro_weight + cfg.trend_weight - 1.0) > 0.01:
             raise ValueError(
                 "Core sleeve weights must sum to 1.0, got "
@@ -143,11 +149,17 @@ class CoreSleeve:
         current_holdings: Mapping[str, int],
         sleeve_equity: float,
         reason: str,
+        last_exit_ts: Mapping[str, datetime] | None = None,
+        now: datetime | None = None,
     ) -> CoreCycleResult:
         """
         Score the universe, pick target weights, compute deltas vs current.
         Caller decides whether to actually place orders (paper/live or dry).
+        last_exit_ts maps symbol to its last exit time in this sleeve; with
+        reentry_cooldown_sec it blocks buy backs (see the module docstring).
         """
+        now = now or datetime.now(timezone.utc)
+        last_exit_ts = last_exit_ts or {}
         result = score_universe(closes, macro, self.cfg)
         target_weights = select_holdings(result, self.cfg)
         decisions: list[CoreDecision] = []
@@ -164,6 +176,13 @@ class CoreSleeve:
             target_value = sleeve_equity * target_w
             target_shares = int(target_value / close)
             current = current_holdings.get(sym, 0)
+            block_reason = None
+            if current <= 0 and target_shares > 0:
+                left = cooldown_remaining(last_exit_ts.get(sym), now, self.reentry_cooldown_sec)
+                if left is not None:
+                    block_reason = format_cooldown(left)
+                    target_w = 0.0
+                    target_shares = 0
             decisions.append(
                 CoreDecision(
                     symbol=sym,
@@ -174,7 +193,8 @@ class CoreSleeve:
                     delta_shares=target_shares - current,
                     close_price=close,
                     score=scores_by_sym.get(sym),
-                    reason=(
+                    reason=block_reason
+                    or (
                         "risk-off bond bucket"
                         if (result.risk_off and target_w > 0)
                         else (
