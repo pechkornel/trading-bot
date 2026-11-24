@@ -40,15 +40,17 @@ BULLISH_CLASSES = {1, 2}
 
 
 def _client_from_session(port: int) -> CPGWClient:
-    """Load the cookie that cpgw_keeper writes; refuse to start if it's missing."""
+    """Load the session file that cpgw_keeper writes; refuse to start if it is missing.
+
+    An empty cookie is fine: the gateway holds the session itself."""
     session = read_session()
-    if session is None or not session.get("cookie"):
+    if session is None:
         raise RuntimeError(
             "No CPGW session found. Start `python -m live.cpgw_keeper` first "
             "(or the cpgw_keeper service) — it logs in and writes the session "
             "cookie that the runners read."
         )
-    client = CPGWClient(cookie=session["cookie"], port=port)
+    client = CPGWClient(cookie=str(session.get("cookie") or ""), port=port)
     if session.get("account_id"):
         client.account_id = session["account_id"]
     return client
