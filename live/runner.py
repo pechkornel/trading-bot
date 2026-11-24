@@ -132,10 +132,12 @@ class Runner:
 
     def _cycle(self) -> None:
         assert self.client is not None
-        # Re-read the session cookie every cycle so the keeper's refreshes flow through
+        # Re-read the session cookie every cycle so the keeper's refreshes flow through.
+        # Follow the file even to an empty cookie (the gateway then holds the session),
+        # so a stale cookie is never kept. A missing file changes nothing.
         session = read_session()
-        if session and session.get("cookie"):
-            self.client.update_cookie(session["cookie"])
+        if session:
+            self.client.update_cookie(str(session.get("cookie") or ""))
 
         raw = self.client.get_historical_data(
             self.symbol,
