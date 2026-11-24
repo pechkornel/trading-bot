@@ -254,8 +254,12 @@ def playwright_page(config: GatewayLoginConfig, pin: str) -> Iterator[_Playwrigh
         browser = None
         context = None
         try:
+            # The sandbox is off on purpose (ADR 0003): Docker's default seccomp profile
+            # blocks the user namespaces it needs. Set explicitly so a library default
+            # change cannot flip it silently. Pinned by a test.
             browser = pw.chromium.launch(
                 headless=True,
+                chromium_sandbox=False,
                 args=[
                     f"--ignore-certificate-errors-spki-list={pin}",
                     "--disable-dev-shm-usage",

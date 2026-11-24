@@ -337,3 +337,40 @@ def test_docs_name_the_pinned_playwright_version():
     for rel in ("deploy/README.md", "docs/adr/0003-headless-gateway-login-and-file-secrets.md"):
         text = (ROOT / rel).read_text()
         assert f"Playwright {version}" in text or f"playwright=={version}" in text, rel
+
+
+def test_launch_sets_chromium_sandbox_explicitly_off(monkeypatch):
+    """Pins the decision in ADR 0003: the sandbox is off on purpose, never by library default.
+
+    A fake playwright.sync_api records the launch arguments, so no browser is needed.
+    """
+    import contextlib
+    import types
+
+    seen = {}
+
+    class FakeChromium:
+        def launch(self, **kwargs):
+            seen.update(kwargs)
+            raise RuntimeError("stop after launch")
+
+    class FakePw:
+        chromium = FakeChromium()
+
+    @contextlib.contextmanager
+    def fake_sync_playwright():
+        yield FakePw()
+
+    mod = types.ModuleType("playwright.sync_api")
+    mod.sync_playwright = fake_sync_playwright
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", mod)
+
+    with pytest.raises(RuntimeError, match="stop after launch"):
+        with gateway_login.playwright_page(config(), "pin"):
+            pass
+
+    assert seen["chromium_sandbox"] is False
+    assert seen["headless"] is True
+    assert "--ignore-certificate-errors-spki-list=pin" in seen["args"]
+    assert not any("sandbox" in a for a in seen["args"])

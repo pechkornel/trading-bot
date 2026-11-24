@@ -73,8 +73,20 @@ Four problems stood in the way:
 - Supply chain: Chromium is downloaded at image build time, pinned only through the
   `playwright` version, not by file hash. The gateway binary risk from ADR 0001 is
   unchanged. Vendoring adds no new trust, it only lets you inspect the file.
-- The Chromium sandbox is off (Playwright's default in Docker), because Docker blocks the
-  user namespaces it needs. The browser opens only the local gateway.
+- The Chromium sandbox is off on purpose and set explicitly (`chromium_sandbox=False`, pinned
+  by a test), not left to Playwright's default (also off, adding `--no-sandbox`). The sandbox
+  needs unprivileged user namespaces. Docker's default seccomp profile blocks `clone` and
+  `unshare` with `CLONE_NEWUSER`, and Ubuntu 24.04 can also restrict them on the host
+  (`kernel.apparmor_restrict_unprivileged_userns`). The setuid helper is not an option with
+  `cap_drop: ALL` and `no-new-privileges`. Enabling it needs a keeper-only seccomp profile and
+  host sysctl changes that cannot be tested here (nothing in the suite runs Docker or a real
+  browser), and failure would break the login. Remaining mitigations: only the local gateway
+  origin is requested (route blocking, no service workers, no downloads), the SPKI pin,
+  `cap_drop: ALL`, `no-new-privileges`, non-root uid 1000, the memory limit and a browser that
+  closes after every login. The keeper still shares the host network namespace and can read the
+  secret, `.env` and the session file. Follow-up: test a keeper-only seccomp profile on the
+  server, then enable the sandbox with a fail-closed launch and an explicit opt-out flag.
+  Playwright is pinned to 1.64.1; the earlier 1.55.0 was about 14 months old.
 - The Telegram token is in `.env` and visible to every container. The cookie file in `logs/`
   is in the nightly backup.
 - The dashboard can spawn workers inside its own container, which has no certificate file,

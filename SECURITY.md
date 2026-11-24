@@ -32,10 +32,20 @@
   screenshot. The browser closes after each login. Whether this headless build honours the
   pin flag is confirmed on the server (`deploy/README.md` section 0B step 12). If it does
   not, navigation fails and nothing is sent.
-- **Chromium sandbox.** Playwright's default `chromiumSandbox: false` is kept, because the
-  Chromium sandbox needs user namespaces that Docker blocks by default. The browser only
-  opens the local gateway address. The keeper container drops all capabilities and sets
-  `no-new-privileges`, and it holds the login secret.
+- **Chromium sandbox.** Off on purpose, and set explicitly (`chromium_sandbox=False`, pinned
+  by a test). Playwright's Python default is also off, which adds `--no-sandbox`. The sandbox
+  needs unprivileged user namespaces. Docker's default seccomp profile blocks them, and on
+  Ubuntu 24.04 an AppArmor setting can block them on the host too. Enabling them would need a
+  custom seccomp profile and host changes that nothing here can test (no Docker or real
+  browser runs in the test suite), and a wrong guess would break the login. So this is a known
+  gap, not a fixed one: a browser exploit would run without the Chromium sandbox, inside the
+  container. Remaining mitigations: the browser only requests the local gateway origin (all
+  other requests are aborted, service workers and downloads are blocked), it trusts exactly
+  one certificate key (SPKI pin), it is short lived (closed after each login), the keeper runs
+  as non-root uid 1000 with `cap_drop: ALL`, `no-new-privileges` and a memory limit, and it
+  holds only a paper login secret. Weaker points: the keeper uses the host network namespace
+  and can read the secret, `.env` and the session file. Follow-up: try a keeper-only seccomp
+  profile on the server and enable the sandbox once it is tested there.
 - **Redaction.** Every keeper event, every exception text that leaves the login code and every
   Telegram message goes through a redactor. It masks the password, the username, the Telegram
   token and `bot<id>:<token>` URL patterns, and cookie headers and pairs. Login error texts
