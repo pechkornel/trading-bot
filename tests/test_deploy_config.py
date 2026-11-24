@@ -31,6 +31,8 @@ def test_dockerfile_cmd_uses_dashboard_host():
     cmd_lines = [line for line in _read("docker/Dockerfile").splitlines() if line.startswith("CMD")]
     assert len(cmd_lines) == 1
     assert HOST_DEFAULT in cmd_lines[0]
+    # exec makes uvicorn PID 1, so it receives SIGTERM from docker stop.
+    assert cmd_lines[0].startswith('CMD ["sh", "-c", "exec uvicorn ')
 
 
 def test_systemd_dashboard_unit_uses_dashboard_host():
