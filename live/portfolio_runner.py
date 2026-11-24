@@ -31,7 +31,9 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from datetime import time as dtime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -56,7 +58,9 @@ from core.market_hours import (
     market_state,
     should_run_entries,
     should_run_exits,
+    to_eastern,
 )
+from core.secret_store import Redactor
 from core.sleeves import (
     CoreCycleResult,
     CoreDecision,
@@ -66,12 +70,27 @@ from core.sleeves import (
     SentimentInput,
     SentimentSatelliteSleeve,
 )
-from live.account_equity import LastReading, format_equity_event, resolve_total_equity
+from live.account_equity import (
+    LastReading,
+    _mask_account,
+    format_equity_event,
+    resolve_total_equity,
+)
 from live.cpgw_keeper import read_session
 from live.storage import Storage
+from live.telegram_notifier import TelegramConfig, TelegramNotifier
+
+SUMMARY_HOUR_ET = 17
+MAX_ALERT_ERROR_CHARS = 200
+_EASTERN = ZoneInfo("America/New_York")
 
 
 class PortfolioRunner:
+    # Class level defaults, so a runner built without __init__ (tests) sends nothing.
+    notifier: Any = None
+    _cookie: str = ""
+    _equity_note: str = ""
+
     def __init__(
         self,
         *,
@@ -91,6 +110,9 @@ class PortfolioRunner:
         self.interval = interval_override or self.portfolio_cfg.cycle_interval_sec
 
         self.storage = Storage()
+        self.notifier = TelegramNotifier(
+            TelegramConfig.from_env(), source="portfolio", storage=self.storage
+        )
         cooldown = self.portfolio_cfg.reentry_cooldown_sec
         self.core = (
             CoreSleeve(self.core_cfg, reentry_cooldown_sec=cooldown)
@@ -165,13 +187,16 @@ class PortfolioRunner:
         print("=" * min(len(banner), 130))
         self._warn_unmanaged_sentiment_holdings()
 
+        # An empty cookie is fine: the gateway holds the session itself. Only a missing
+        # session file means the keeper never ran.
         session = read_session()
-        if session is None or not session.get("cookie"):
+        if session is None:
             raise RuntimeError(
                 "No CPGW session. Start `live.cpgw_keeper` first so the SRP login "
                 "runs and writes logs/cpgw_session.json."
             )
-        self.client = CPGWClient(cookie=session["cookie"], port=self.app_cfg.ib.port)
+        self._cookie = str(session.get("cookie") or "")
+        self.client = CPGWClient(cookie=self._cookie, port=self.app_cfg.ib.port)
         if session.get("account_id"):
             self.client.account_id = session["account_id"]
 
@@ -218,6 +243,7 @@ class PortfolioRunner:
             except Exception as e:  # noqa: BLE001
                 self.storage.log_event("error", "portfolio", f"cycle error: {e}")
                 print(f"[portfolio] cycle error: {e}")
+                self._notify("error", f"portfolio cycle error: {self._safe(str(e))}")
             if self.once:
                 return
             elapsed = time.time() - cycle_start
@@ -232,6 +258,7 @@ class PortfolioRunner:
         # Refresh cookie from the keeper's session file every cycle
         session = read_session()
         if session and session.get("cookie"):
+            self._cookie = str(session["cookie"])
             self.client.update_cookie(session["cookie"])
 
         cycle_id = uuid.uuid4().hex[:12]
@@ -244,6 +271,7 @@ class PortfolioRunner:
         level = "info" if reading.source == "gateway" or reading.disabled else "warn"
         self.storage.log_event(level, "portfolio", equity_note)
         print(f"[portfolio] {equity_note}")
+        self._equity_note = format_equity_event(reading)
         if reading.source == "gateway":
             self.storage.log_equity(reading.equity)
         total_equity = reading.equity
@@ -281,6 +309,99 @@ class PortfolioRunner:
             self.storage.log_event(
                 "info", "portfolio", f"cycle={cycle_id} no sleeves enabled — {mkt_note}"
             )
+
+        self._maybe_send_daily_summary(now)
+
+    # ---- notifications ----
+
+    def _safe(self, text: str, limit: int = MAX_ALERT_ERROR_CHARS) -> str:
+        """Redact the session cookie and mask account ids, then truncate."""
+        out = Redactor([self._cookie]).redact(str(text))
+        out = _mask_account(out, getattr(self.client, "account_id", None))
+        return out[:limit]
+
+    def _notify(self, kind: str, text: str) -> bool:
+        """Send through the notifier. Never raises, never blocks trading logic."""
+        if self.notifier is None:
+            return False
+        try:
+            return bool(self.notifier.send(kind, text))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _notify_order(
+        self,
+        *,
+        sleeve: str,
+        symbol: str,
+        action: str,
+        quantity: int,
+        price: float,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """One message per order: [DRY-RUN], [PAPER] or [PAPER] FAILED."""
+        line = f"{sleeve} {action} {quantity} {symbol} @ {price:.2f}"
+        if status == "failed":
+            text = f"[PAPER] FAILED {line}: {self._safe(error or 'unknown error')}"
+        elif status == "logged":
+            text = f"[DRY-RUN] {line}"
+        else:
+            text = f"[PAPER] {line}"
+        self._notify("order", text)
+
+    def _maybe_send_daily_summary(self, now: datetime) -> None:
+        """One summary per US Eastern date, at or after 17:00 ET.
+
+        The sent marker is a `telegram` event in SQLite, so a restart does not resend.
+        A failed send leaves no marker and is tried again next cycle.
+        """
+        if self.notifier is None:
+            return
+        try:
+            eastern = to_eastern(now)
+            if eastern.hour < SUMMARY_HOUR_ET:
+                return
+            marker = f"daily_summary {eastern.date().isoformat()}"
+            if self.storage.has_event("telegram", marker):
+                return
+            if self._notify("summary", self._summary_text(now, eastern)):
+                self.storage.log_event("info", "telegram", marker)
+        except Exception as e:  # noqa: BLE001
+            self.storage.log_event("warn", "portfolio", f"daily summary failed: {type(e).__name__}")
+
+    def _summary_text(self, now: datetime, eastern: datetime) -> str:
+        start_et = datetime.combine(eastern.date(), dtime(0, 0), tzinfo=_EASTERN)
+        since = start_et.astimezone(timezone.utc).isoformat()
+        counts = self.storage.order_status_counts(since)
+        orders = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "none"
+        errors = self.storage.count_events("error", since)
+        holdings = ", ".join(
+            f"{sleeve} {len(self.storage.get_holdings(sleeve))}" for sleeve in ("core", "sentiment")
+        )
+        health = self.storage.last_event("sentiment_health")
+        if health:
+            health_text = f"{health['level']} {health['message']} ({health['ts'][:16]})"
+        else:
+            health_text = "no sentiment_health events"
+        session = read_session()
+        keeper = "no session file"
+        if session and isinstance(session.get("updated_at"), (int, float)):
+            age_min = max(0, int((now.timestamp() - float(session["updated_at"])) // 60))
+            keeper = f"session file updated {age_min} min ago"
+        text = "\n".join(
+            [
+                f"daily summary {eastern.date().isoformat()}",
+                f"dry_run: {self.dry_run}",
+                f"equity: {self._equity_note or 'no reading this run'}",
+                f"holdings: {holdings}",
+                f"orders today: {orders}",
+                f"errors: {errors}",
+                f"keeper: {keeper}",
+                f"sentiment health: {health_text}",
+            ]
+        )
+        return self._safe(text, 3000)
 
     # ---- core sleeve ----
 
@@ -451,6 +572,14 @@ class PortfolioRunner:
                 shares=float(d.target_shares),
                 avg_cost=d.close_price,
             )
+            self._notify_order(
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                price=entry,
+                status="logged",
+            )
             return
 
         assert self.client is not None
@@ -488,6 +617,14 @@ class PortfolioRunner:
                 shares=float(d.target_shares),
                 avg_cost=d.close_price,
             )
+            self._notify_order(
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                price=entry,
+                status="placed",
+            )
         except Exception as e:  # noqa: BLE001
             self.storage.log_event("error", "core", f"order failed for {d.symbol}: {e}")
             self.storage.log_order(
@@ -504,6 +641,15 @@ class PortfolioRunner:
                 dry_run=False,
                 status="failed",
                 note=str(e),
+            )
+            self._notify_order(
+                sleeve="core",
+                symbol=d.symbol,
+                action=action,
+                quantity=qty,
+                price=entry,
+                status="failed",
+                error=str(e),
             )
 
     # ---- sentiment satellite ----
@@ -669,6 +815,14 @@ class PortfolioRunner:
                     shares=float(quantity),
                     avg_cost=price,
                 )
+            self._notify_order(
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                price=entry,
+                status="logged",
+            )
             return
         try:
             conid = self.client.conid_for_stock(symbol)
@@ -707,6 +861,14 @@ class PortfolioRunner:
                     shares=float(quantity),
                     avg_cost=price,
                 )
+            self._notify_order(
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                price=entry,
+                status="placed",
+            )
         except Exception as e:  # noqa: BLE001
             self.storage.log_event("error", "sentiment", f"{symbol} {action} failed: {e}")
             self.storage.log_order(
@@ -723,6 +885,15 @@ class PortfolioRunner:
                 dry_run=False,
                 status="failed",
                 note=str(e),
+            )
+            self._notify_order(
+                sleeve="sentiment",
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                price=entry,
+                status="failed",
+                error=str(e),
             )
 
     # ---- price fetching helpers ----
