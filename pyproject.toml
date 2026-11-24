@@ -12,7 +12,7 @@ force-exclude = true
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["core", "dashboard", "live", "models", "scripts", "tests"]
+known-first-party = ["backtest", "core", "dashboard", "live", "models", "scripts", "tests"]
 
 [tool.ruff.format]
 quote-style = "double"

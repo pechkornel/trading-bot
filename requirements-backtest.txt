@@ -1,0 +1,5 @@
+# Extra dependencies for the offline backtest (python -m backtest.run).
+# Not installed in Docker or CI: the backtest tests need only requirements-dev.txt.
+-r requirements.txt
+yfinance>=0.2.40
+matplotlib>=3.8
