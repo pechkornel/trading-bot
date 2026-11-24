@@ -114,18 +114,27 @@ class OrderTicket:
     raw: dict[str, Any] | None = None
 
 
-def _build_verify(ca_file: str | None) -> ssl.SSLContext | bool:
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _build_verify(ca_file: str | None, host: str = "localhost") -> ssl.SSLContext | bool:
     """
     TLS verification setting for the gateway connection.
 
-    No certificate configured: verify=False, as before (the host Java gateway uses
-    a self-signed cert and the URL is localhost-pinned). With `ca_file` or the
+    No certificate configured: verify=False for a loopback host only, as before (the
+    host Java gateway uses a self-signed cert). A non-loopback host without a
+    certificate is refused, because the traffic would leave the machine unverified. With `ca_file` or the
     `CPGW_CA_FILE` variable set, trust only that certificate and check the host
     name. A set but unusable file fails closed. Messages never include the path
     or any file content.
     """
     path = (ca_file if ca_file is not None else os.environ.get("CPGW_CA_FILE", "")).strip()
     if not path:
+        if host.strip("[]").lower() not in _LOOPBACK_HOSTS:
+            raise CPGWError(
+                "CPGW_CA_FILE is required when the gateway host is not loopback "
+                "(localhost, 127.0.0.1, ::1)"
+            )
         return False
     try:
         ctx = ssl.create_default_context(cafile=path)
@@ -163,11 +172,12 @@ class CPGWClient:
         timeout: float = 30.0,
         ca_file: str | None = None,
     ) -> None:
+        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
         self.account_id: str | None = None
         self._conid_cache: dict[str, int] = {}
         self._client = httpx.Client(
-            base_url=f"https://{host}:{port}",
-            verify=_build_verify(ca_file),
+            base_url=f"https://{url_host}:{port}",
+            verify=_build_verify(ca_file, host),
             timeout=timeout,
             headers={
                 "accept": "application/json",
