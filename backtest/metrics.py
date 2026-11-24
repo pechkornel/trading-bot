@@ -81,7 +81,7 @@ def calmar(cagr_value: float, depth: float) -> float | None:
 
 
 def annual_turnover(turnover: pd.Series, n_returns: int) -> float:
-    """One-way annual turnover, 1.0 = 100%."""
+    """Two-way annual turnover (buys plus sells): a full switch counts as 2.0."""
     return float(turnover.sum() / (n_returns / TRADING_DAYS))
 
 

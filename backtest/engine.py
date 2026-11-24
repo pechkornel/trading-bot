@@ -2,10 +2,10 @@
 
 Offline and dependency-light: pandas and numpy only. No yfinance, no matplotlib.
 
-Timing: a decision made at the close of day t is filled at the close of the next calendar
+Timing: a decision made at the close of day t is filled at the close of the next trading
 day. Weights drift with prices between trades. Cost is `cost_bps / 10_000 * turnover` of
 equity on the fill day, where turnover is `sum(|target - drifted|)` over assets (cash
-excluded), so a first buy from cash is 1.0 and a full switch is 2.0. Cash earns 0.
+excluded), so a first buy from cash is 1.0 and a full switch is 2.0 (buys plus sells). Cash earns 0.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ _WEIGHT_TOL = 1e-9
 class SimResult:
     equity: pd.Series  # starts at 1.0 on the first calendar day
     weights: pd.DataFrame  # post-fill weights per day (cash is 1 - row sum)
-    turnover: pd.Series  # one-way turnover on fill days, else 0
+    turnover: pd.Series  # two-way turnover (buys plus sells) on fill days, else 0
     costs: pd.Series  # cost as a fraction of pre-cost equity on fill days, else 0
     fills: list[tuple[pd.Timestamp, dict[str, float]]] = field(default_factory=list)
 
@@ -168,7 +168,7 @@ def buy_and_hold(symbol: str) -> DecideFn:
 
 
 def monthly_rebalance(weights: dict[str, float], calendar: pd.DatetimeIndex) -> DecideFn:
-    """Decide on the first call and on every day whose next calendar day is in a new month."""
+    """Decide on the first call and on every day whose next trading day is in a new month."""
     target = dict(weights)
     pos = {t: i for i, t in enumerate(calendar)}
     state = {"first": True}
