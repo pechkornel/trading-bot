@@ -39,7 +39,8 @@ Four problems stood in the way:
 - **File secrets.** The login is `secrets/ibkr_login` (mode 600, owner must be the reading
   uid, checked by `core/secret_store.py`) and the gateway key password is
   `secrets/gateway_ssl_password`. Both are Compose file secrets, each mounted into one
-  service. The keeper refuses to start while `IBKR_PASSWORD` is set in its environment.
+  service. The keeper refuses to start while `IBKR_PASSWORD` is set in its environment or
+  in `.env` (checked after `.env` is loaded).
   A redactor masks secrets and tokens in every event, exception text and Telegram message.
 - **Gateway container.** The pinned release zip is fetched by `scripts/fetch_gateway.sh`
   into `vendor/` and checked against one hash file, again in the image build. IBKR's default
@@ -49,11 +50,15 @@ Four problems stood in the way:
   `172.31.250.1`.
 - **Session policy and lockout.** `live/keeper_policy.py` is pure. The keeper never logs in
   while authenticated or while the gateway is down, and not inside the nightly gap or the
-  Saturday window. Backoff is 60 s up to 30 minutes. A wrong password, a second factor, an
-  unknown page state or a non-paper account locks out at once. Three submitted attempts in
-  24 hours lock out too. The lockout is persisted and cleared only by
-  `--reset-lockout`. After every login, every account id must start with `DU`, or the
-  keeper logs out and locks itself.
+  Saturday window. Right before a submit it checks the gateway again without the stored
+  cookie: only a 401 or `authenticated: false` allows the login; any other answer waits, with
+  one alert after 5 unclear checks. Backoff is 60 s up to 30 minutes. A wrong password, a
+  second factor, an unknown page state, a non-paper account or a login setup error (CA file
+  missing or invalid, Playwright missing, non-local URL; reason `setup:`, no form submitted)
+  locks out at once. Three failed or six total submitted logins in 24 hours lock out too. The
+  lockout is persisted and cleared only by `--reset-lockout`. After every login, the accounts
+  are checked up to 3 times: an account id without the `DU` prefix makes the keeper log out
+  and lock itself; errors or an empty list do not log out, they alert and retry later.
 - **Telegram** carries the alerts. Gmail stays for the single-symbol runner only.
 - **Sentiment sleeve off.** Alpha Vantage `NEWS_SENTIMENT` is premium, so the satellite is in
   `status: research` with 0% allocation, the service is in profile `research`, and a
