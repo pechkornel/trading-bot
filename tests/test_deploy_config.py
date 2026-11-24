@@ -1,5 +1,6 @@
 """Offline checks of the deploy files. They pin the safety properties."""
 
+import re
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -171,3 +172,12 @@ def test_dockerignore_keeps_the_private_auth_module():
     lines = _ignore_lines(".dockerignore")
     assert not any("ibkr_auth_private" in line or line == "core/" for line in lines)
     assert not any(fnmatch("core/ibkr_auth_private.py", line) for line in lines)
+
+
+def test_gateway_dockerfile_pins_every_base_image_by_digest():
+    froms = [
+        line for line in _read("docker/gateway/Dockerfile").splitlines() if line.startswith("FROM ")
+    ]
+    assert len(froms) == 2
+    for line in froms:
+        assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64}( AS \w+)?$", line), line
