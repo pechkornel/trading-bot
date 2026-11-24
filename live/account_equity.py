@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from core.config import PortfolioConfig
 
 MAX_ERROR_CHARS = 160
+_ACCOUNT_SHAPED = re.compile(r"\b[A-Z]{1,2}\d{5,}\b")
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class EquityReading:
     reason: str  # "" for gateway, otherwise why the fallback was used
     currency: str | None = None
     as_of: str | None = None  # timestamp of the reused reading (source "last_gateway")
+    disabled: bool = False  # True only when use_account_equity is false (a deliberate choice)
 
 
 @dataclass(frozen=True)
@@ -46,14 +49,18 @@ def parse_net_liquidation(summary: object) -> tuple[float, str | None]:
     if isinstance(amount, bool) or not isinstance(amount, (int, float)):
         raise ValueError("amount is not a number")
     currency = entry.get("currency")
-    return float(amount), currency if isinstance(currency, str) else None
+    try:
+        value = float(amount)
+    except OverflowError:
+        raise ValueError("amount is not a number") from None
+    return value, currency if isinstance(currency, str) else None
 
 
 def _mask_account(text: str, account_id: object) -> str:
-    """Replace the account id in `text` with `***` plus its last 2 characters."""
-    if not isinstance(account_id, str) or not account_id:
-        return text
-    return text.replace(account_id, "***" + account_id[-2:])
+    """Mask the account id, and anything shaped like one, as `***` plus its last 2 characters."""
+    if isinstance(account_id, str) and account_id:
+        text = text.replace(account_id, "***" + account_id[-2:])
+    return _ACCOUNT_SHAPED.sub(lambda m: "***" + m.group(0)[-2:], text)
 
 
 def _usable_last(
@@ -78,7 +85,12 @@ def _resolve(
     client: object, cfg: PortfolioConfig, last: LastReading | None, now: datetime
 ) -> EquityReading:
     if not cfg.use_account_equity:
-        return _fallback(cfg, "disabled (portfolio.use_account_equity: false)")
+        return EquityReading(
+            cfg.starting_equity,
+            "starting_equity",
+            "disabled (portfolio.use_account_equity: false)",
+            disabled=True,
+        )
     last = _usable_last(cfg, last, now)
     if client is None:
         return _fallback(cfg, "no gateway client", last)
@@ -98,7 +110,9 @@ def _resolve(
     if amount <= 0:
         return _fallback(cfg, f"net liquidation not positive ({amount:,.2f})", last)
     if currency is not None and currency.upper() != cfg.equity_currency.upper():
-        return _fallback(cfg, f"currency {currency}, expected {cfg.equity_currency}", last)
+        return _fallback(
+            cfg, f"currency {currency[:MAX_ERROR_CHARS]}, expected {cfg.equity_currency}", last
+        )
     low = cfg.equity_min_ratio * cfg.starting_equity
     high = cfg.equity_max_ratio * cfg.starting_equity
     if not low <= amount <= high:

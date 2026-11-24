@@ -430,3 +430,40 @@ def test_failed_read_reuses_last_gateway_reading_without_drift_rebalance(tmp_pat
     assert equity_rows(tmp_path) == [60_000.0]  # the pre-existing row only, none added
     with sqlite3.connect(tmp_path / "bot.sqlite") as c:
         assert c.execute("SELECT COUNT(*) FROM rebalances").fetchone()[0] == 0
+
+
+def test_disabled_account_equity_logs_at_info_and_uses_starting_equity(tmp_path, monkeypatch):
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    r.portfolio_cfg = PortfolioConfig(use_account_equity=False, reentry_cooldown_sec=DAY)
+    r.client.summary = nl_summary(123_456.78)
+    seen = capture_sleeve_equity(r)
+
+    r._cycle()
+
+    start = r.portfolio_cfg.starting_equity
+    assert seen == {"sat": start, "core": start}
+    events = equity_events(r.storage)
+    assert events[0]["level"] == "info"
+    assert "disabled" in events[0]["message"]
+    assert equity_rows(tmp_path) == []
+
+
+def test_level_follows_disabled_field_not_reason_text(tmp_path, monkeypatch):
+    # A gateway error whose text starts with "disabled" is still a warning.
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    r.client.exc = RuntimeError("x")
+    import live.portfolio_runner as pr
+    from live.account_equity import EquityReading
+
+    monkeypatch.setattr(
+        pr,
+        "resolve_total_equity",
+        lambda *a, **k: EquityReading(1.0, "starting_equity", "disabled by someone else"),
+    )
+    capture_sleeve_equity(r)
+
+    r._cycle()
+
+    assert equity_events(r.storage)[0]["level"] == "warn"

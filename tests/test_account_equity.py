@@ -70,9 +70,12 @@ def test_missing_currency_accepted(cfg):
 
 def test_disabled_by_config():
     cfg = PortfolioConfig(use_account_equity=False)
-    assert_fallback(
-        resolve_total_equity(FakeAccountClient(nl()), cfg),
+    r = resolve_total_equity(FakeAccountClient(nl()), cfg)
+    assert r == EquityReading(
+        100_000.0,
+        "starting_equity",
         "disabled (portfolio.use_account_equity: false)",
+        disabled=True,
     )
 
 
@@ -299,3 +302,32 @@ def test_step_check_ignored_when_last_reading_is_too_old(cfg):
 def test_equity_max_step_must_be_positive():
     with pytest.raises(ValueError, match="equity_max_step"):
         PortfolioConfig(equity_max_step=0)
+
+
+def test_account_id_shaped_text_is_masked_in_errors(cfg):
+    exc = RuntimeError("bad request for U1234567 and DU7654321 and DUX12345")
+    r = resolve_total_equity(FakeAccountClient(exc=exc), cfg)
+    assert "U1234567" not in r.reason
+    assert "DU7654321" not in r.reason
+    assert "***67" in r.reason
+    assert "***21" in r.reason
+    assert "DUX12345" in r.reason  # three letters is not account-id shaped
+
+
+def test_long_currency_is_capped_in_reason(cfg):
+    r = resolve_total_equity(FakeAccountClient(nl(150_000, "X" * 5000)), cfg)
+    assert r.source == "starting_equity"
+    assert len(r.reason) < 400
+
+
+def test_overflowing_amount_is_not_a_number(cfg):
+    assert_fallback(
+        resolve_total_equity(FakeAccountClient(nl(10**400)), cfg),
+        "bad summary: amount is not a number",
+    )
+
+
+def test_only_disabled_config_sets_disabled_flag(cfg):
+    assert resolve_total_equity(FakeAccountClient(exc=RuntimeError("x")), cfg).disabled is False
+    assert resolve_total_equity(None, cfg).disabled is False
+    assert resolve_total_equity(FakeAccountClient(nl()), cfg).disabled is False
