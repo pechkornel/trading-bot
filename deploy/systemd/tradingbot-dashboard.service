@@ -8,8 +8,10 @@ Type=exec
 User=%i
 # Assumes the repo is cloned at /opt/trading-bot. Edit every path below if not.
 WorkingDirectory=/opt/trading-bot
+# Loopback by default. A DASHBOARD_HOST line in .env overrides this value.
+Environment=DASHBOARD_HOST=127.0.0.1
 EnvironmentFile=/opt/trading-bot/.env
-ExecStart=/opt/trading-bot/.venv/bin/uvicorn dashboard.app:app --host 127.0.0.1 --port 8765
+ExecStart=/opt/trading-bot/.venv/bin/uvicorn dashboard.app:app --host ${DASHBOARD_HOST} --port 8765
 Restart=on-failure
 RestartSec=5
 # Block live ports at the firewall level too — paper-only deployment

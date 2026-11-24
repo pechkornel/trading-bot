@@ -32,4 +32,5 @@ EXPOSE 8765
 
 # Default command runs the dashboard. The portfolio service in docker-compose
 # overrides this with `python -m live.portfolio_runner`.
-CMD ["uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8765"]
+# Shell form on purpose, so ${DASHBOARD_HOST} is expanded. Default is loopback.
+CMD uvicorn dashboard.app:app --host ${DASHBOARD_HOST:-127.0.0.1} --port 8765

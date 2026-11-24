@@ -2,6 +2,7 @@
 #
 # What runs:
 #   - `dashboard`     — always on, FastAPI on host port 8765
+#                       (bound to DASHBOARD_HOST, default 127.0.0.1)
 #   - `cpgw_keeper`   — auto profile; SRP login + /tickle keepalive
 #   - `portfolio`     — auto profile; multi-sleeve runner, depends on the keeper
 #   - `sentiment`     — auto profile; news/sentiment poller
@@ -42,7 +43,7 @@ services:
       - uvicorn
       - dashboard.app:app
       - --host
-      - 0.0.0.0
+      - ${DASHBOARD_HOST:-127.0.0.1}
       - --port
       - "8765"
     healthcheck:
