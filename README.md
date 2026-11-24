@@ -90,9 +90,11 @@ macro code (see [ADR 0002](docs/adr/0002-own-backtest-replay.md)). Period 2008-0
 
 ![Equity and drawdown](docs/backtest/equity_curve.png)
 
-**The core sleeve underperformed all three benchmarks over this period.** Its CAGR and Sharpe
-are lower than SPY, 60/40 and equal weight. Its drawdown was smaller than SPY and 60/40 but
-not smaller than equal weight. In the ablations, disabling the risk-off switch improved it
+**The core sleeve had a lower CAGR and Sharpe than SPY and 60/40 for every rebalance
+weekday.** Against equal weight it is behind with the live Friday rebalance but close or
+ahead on other weekdays, and the Sharpe difference is not statistically significant (see the
+weekday and bootstrap tables in [docs/backtest/results.md](docs/backtest/results.md)). Its
+drawdown was smaller than SPY and 60/40 but not smaller than equal weight. In the ablations, disabling the risk-off switch improved it
 (CAGR 4.86%, Sharpe 0.36, max drawdown -17.66%), and so did dropping the macro score or
 using momentum only. No variant beat 60/40 or SPY. Full tables, calendar-year returns and the
 list of deviations from live are in [docs/backtest/results.md](docs/backtest/results.md).
@@ -105,19 +107,25 @@ Limitations:
 - Parameters were fixed before the test and not optimised.
 - One decision a day at the close, filled at the next close with fractional weights. Live uses
   DAY limit orders on integer shares.
+- Live fills on Friday intraday. The backtest decides at Friday's close and fills at the next
+  trading day's close (usually Monday). Results depend on the rebalance weekday.
+- No significance: the strategy-minus-benchmark Sharpe differences have wide bootstrap
+  intervals, so small gaps between portfolios are not evidence.
+- Signals use raw `Close` (price return, no dividends), as the live bot does. Bond ETFs are
+  understated by their yield.
 - Costs are a flat bps rate: no slippage, taxes or fees. Cash earns 0.
 - Drift is measured against marked-to-market equity. Live uses a fixed budget.
 - Macro inputs are Yahoo and FRED final data, not point-in-time vintages, so revisions are
   not modelled.
 - The re-entry cooldown never binds in the replay.
-- Turnover is high (about 13x per year), so the result is cost sensitive: 4.29% CAGR at 0 bps,
+- Turnover is high (about 13x per year, buys plus sells), so the result is cost sensitive: 4.29% CAGR at 0 bps,
   1.61% at 20 bps.
 
 To reproduce (network needed; the first run downloads the price and macro series and caches
 them in `data/cache/backtest/`):
 
 ```sh
-pip install -r requirements-backtest.txt
+uv pip install -r requirements-backtest.txt
 python -m backtest.run               # add --refresh to download everything again
 ```
 
