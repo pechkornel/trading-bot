@@ -36,6 +36,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from core.auth_types import (
+    GatewayUnreachable,
     IBKRAuthError,
     IbkrCredentials,
     LoginSetupError,
@@ -192,6 +193,8 @@ class Keeper:
         self._paper_unsure = False
         self._last_paper_alert: datetime | None = None
         self._pending_cookie: str | None = None  # from a login whose paper check was unsure
+        self._submit_seen = False  # set by _on_submit during one login call
+        self._warned_silent_login = False
 
     # ---- output helpers (everything passes the Redactor) ----
 
@@ -559,6 +562,7 @@ class Keeper:
         """Called by the login flow right before the form is submitted.
 
         A failed save raises, so the form is never submitted without a durable record."""
+        self._submit_seen = True
         policy.record_submit(self.state, self._clock())
         try:
             policy.save_state(self.state_path, self.state)
@@ -568,7 +572,23 @@ class Keeper:
                 "cannot record the login attempt, so no login was submitted"
             ) from None
 
+    def _count_silent_submit(self, now: datetime) -> None:
+        """The private login() returned or raised without calling on_submit.
+
+        Count the attempt here so the lockout and the login cap still hold. Counting is
+        the safe side when it is unclear whether a form was submitted."""
+        policy.record_submit(self.state, now)
+        self._save()
+        if not self._warned_silent_login:
+            self._warned_silent_login = True
+            self._event(
+                "warn",
+                "the private login does not report submits (on_submit was never called); "
+                "the keeper counts each login call as a submit. Update the private login.",
+            )
+
     def _full_login(self, now: datetime) -> None:
+        self._submit_seen = False
         try:
             cookie = self._login(self.creds, port=self.cpgw_port, on_submit=self._on_submit)
         except NotImplementedError:
@@ -577,12 +597,22 @@ class Keeper:
                 ManualStepRequired("automated login is not available in this build"), now
             )
             return
+        except (LoginSetupError, GatewayUnreachable) as e:
+            # No form was submitted for these, so they are not counted as a submit.
+            self._handle_login_failure(e, now)
+            return
         except IBKRAuthError as e:
+            if not self._submit_seen:
+                self._count_silent_submit(now)
             self._handle_login_failure(e, now)
             return
         except Exception as e:  # noqa: BLE001 - unknown failure: count it and back off
+            if not self._submit_seen:
+                self._count_silent_submit(now)
             self._handle_login_failure(IBKRAuthError(f"{type(e).__name__}: {e}"), now)
             return
+        if not self._submit_seen:
+            self._count_silent_submit(now)
 
         try:
             account = self._finish_login(cookie)
