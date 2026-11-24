@@ -30,7 +30,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (927 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (964 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - Account equity sizing: each cycle sizes the sleeves from the paper account's net liquidation and logs one `equity:` event. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio`, `equity_max_step`, `equity_last_max_age_sec` and `equity_currency` (#20).
 - The control page shows the last net liquidation next to the starting equity (#20).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
@@ -39,6 +39,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- New keeper key `cookieless_401_means_logged_out` (default true). Set it to false when the gateway answers 401 to a cookie-less request while logged in: a 401 then counts as unsure and the keeper never submits on it. `deploy/README.md` section 0B step 13 has the server check.
 - The sentiment satellite is in `status: research` with `allocation_pct: 0`, because Alpha Vantage `NEWS_SENTIMENT` is now premium. 30% of equity stays unallocated. A research sleeve must have 0% allocation.
 - The `sentiment` compose service moved to profile `research`, so `--profile auto` no longer polls it.
 - The gateway uses its own TLS key (generated on first start into the `ibkr_gateway_tls` volume), takes `sslPwd` from a Docker secret and allows only `127.0.0.1` and `172.31.250.1`. IBKR's shared default keystore is no longer used.
@@ -69,6 +70,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The keeper counts a login attempt itself when the private `login()` never calls `on_submit`, so the 3 failure lockout and the 6 login cap still hold. It warns once per process.
+- `live.runner` and `scripts.train_symbol` accept an empty cookie in the session file, like the portfolio runner.
+- `--live` in `live.runner` and `live.portfolio_runner` is refused unless the session account id starts with the keeper paper prefix (`DU` by default). Dry runs are unchanged.
 - The keeper logs in after an explicit 401 from its pre-login check, waits on other unclear answers, and writes the session file for a session it adopts.
 - A login setup error locks out once with a setup alert, an empty account list is retried instead of locking out, and `--reset-lockout` clears the alert cooldowns.
 - The portfolio runner follows the session file to an empty cookie after a keeper re-login, instead of keeping the stale one.
