@@ -24,13 +24,19 @@ ASSUMPTIONS = [
     "Signals use Yahoo split-adjusted `Close`. P&L uses `Adj Close` (dividends reinvested). "
     "Adjusted closes are never passed to the sleeve, the scoring code or the macro fetcher.",
     "Timing: each trading day is evaluated once at 21:00 UTC (the 16:00 New York close). A "
-    "decision made at the close of day t is filled at the close of the next calendar day. "
-    "The strategy starts in cash and waits for the first Friday decision, like the live "
-    "sleeve (the weekly rebalance falls on Friday's close).",
+    "decision made at the close of day t is filled at the close of the next trading day. "
+    "The strategy starts in cash and waits for the first decision on the rebalance weekday "
+    "(Friday in the live config). A Friday decision is therefore filled at the next "
+    "trading day's close, usually Monday. See the weekday sensitivity table.",
     "Costs: `cost_bps / 10000 * turnover` of equity on the fill day, where turnover is the "
-    "sum of absolute weight changes over assets (cash excluded). A first buy from cash is "
-    "1.0, a full switch is 2.0. The first entry is charged for every portfolio.",
+    "sum of absolute weight changes over assets (cash excluded), so it is two-way (buys plus "
+    "sells). A first buy from cash is 1.0, a full switch is 2.0. The first "
+    "entry is charged for every portfolio.",
     "Cash earns 0. Weight not invested earns nothing.",
+    "Momentum, trend and the HYG/LQD credit ratio use raw `Close` (price return, no "
+    "dividends), exactly as the live bot does. Bond ETFs and BIL are understated by their "
+    "yield, and distribution days (for example DBC each December) look like price drops for "
+    "12 months. This is a property of the live bot's signals, not of the backtest.",
     "Holdings given to the sleeve are synthetic fractional shares on a constant notional, so "
     "the drift rule sees true current weights. Live uses integer shares and DAY limit orders "
     "at plus or minus 5 bps; the backtest fills fractional weights at the next close.",
@@ -53,7 +59,9 @@ ASSUMPTIONS = [
     "(BIL included). The two rebalanced benchmarks decide on the last trading day of each "
     "month and fill on the first trading day of the next month, at the same cost rate as the "
     "strategy run they are compared with.",
-    "The risk-free rate for Sharpe and Sortino is the BIL daily adjusted close return.",
+    "The risk-free rate for Sharpe and Sortino is the BIL daily adjusted close return. It "
+    "includes BIL's expense ratio (about 0.135%), which slightly flatters every Sharpe.",
+    "CAGR uses 252 trading days per year: `(end / start) ** (252 / n_returns) - 1`.",
     "Risk-off share: share of trading days positioned on a risk-off decision, from the fill "
     "day of that decision to the next fill.",
     "Start date: first trading day on which every required ticker has enough raw closes for "
@@ -63,6 +71,10 @@ ASSUMPTIONS = [
 ]
 
 LIVE_GAPS = [
+    "Live evaluates on the first open cycle on Friday using intraday data and fills the same "
+    "day with DAY limit orders. The backtest decides at Friday's close and fills at the next "
+    "trading day's close (usually Monday). The weekday sensitivity table shows how much the "
+    "choice of weekday matters.",
     "Live fills are DAY limit orders at plus or minus 5 bps on integer shares and may be "
     "partial or missed. The backtest fills fractional weights at the next close.",
     "Live decides when the runner wakes up on its schedule, not at a fixed close.",
@@ -123,7 +135,7 @@ _METRIC_HEADER = [
     "Trough",
     "Recovery",
     "Calmar",
-    "Turnover per year",
+    "Turnover per year (buys plus sells)",
     "Risk-off share",
 ]
 
@@ -270,7 +282,13 @@ def render_markdown(results: dict, generated_at: str, chart: bool = False) -> st
     out += [f"- {g}" for g in LIVE_GAPS]
     out += [""]
 
-    out += ["## Headline results", "", f"Strategy and benchmarks, base cost {cost:g} bps.", ""]
+    out += [
+        "## Headline results",
+        "",
+        f"Strategy and benchmarks, base cost {cost:g} bps. Turnover is two-way (buys plus "
+        "sells): a full switch counts as 200%.",
+        "",
+    ]
     rows = [_metric_row("Strategy (core sleeve)", base)]
     rows += [_metric_row(BENCHMARK_LABELS.get(k, k), v) for k, v in bench.items()]
     out += _table(_METRIC_HEADER, rows)
@@ -313,7 +331,7 @@ def render_markdown(results: dict, generated_at: str, chart: bool = False) -> st
             "Sortino",
             "Max drawdown",
             "Calmar",
-            "Turnover per year",
+            "Turnover per year (buys plus sells)",
             "Risk-off share",
             "Cost (bps)",
         ],

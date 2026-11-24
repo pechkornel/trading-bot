@@ -43,6 +43,19 @@ def _results(bootstrap):
     }
 
 
+def test_wording_is_accurate_about_timing_turnover_and_signals():
+    text = "\n".join([*report.ASSUMPTIONS, *report.LIVE_GAPS, *report._METRIC_HEADER])
+    assert "calendar day" not in text.replace("calendar-year", "")
+    assert "next trading day" in text
+    assert "Turnover per year (buys plus sells)" in text
+    assert "a full switch is 2.0" in text
+    assert "first open cycle on Friday" in text and "weekday sensitivity" in text
+    assert "price return" in text and "DBC" in text
+    assert "0.135%" in text
+    assert "252 trading days per year" in text
+    assert "like the live sleeve" not in text
+
+
 def test_weekday_section_marks_live_day():
     text = "\n".join(report._weekday_section(_results(None)))
     assert "## Rebalance weekday sensitivity" in text
