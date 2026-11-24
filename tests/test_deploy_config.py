@@ -376,3 +376,12 @@ def test_phase1_section_starts_with_a_backup_and_never_uses_live():
     assert "--live" not in section
     assert "uv run" not in section and "uv sync" not in section
     assert "—" not in section and "–" not in section
+
+
+def test_keeper_drops_capabilities_like_the_gateway():
+    services = _compose()["services"]
+    keeper = services["cpgw_keeper"]
+    assert keeper["cap_drop"] == ["ALL"]
+    assert keeper["security_opt"] == ["no-new-privileges:true"]
+    assert keeper["cap_drop"] == services["ibkr_gateway"]["cap_drop"]
+    assert keeper["security_opt"] == services["ibkr_gateway"]["security_opt"]

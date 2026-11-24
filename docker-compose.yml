@@ -101,6 +101,8 @@ services:
       - ibkr_gateway_tls:/app/gateway_tls:ro
     environment:
       - CPGW_CA_FILE=/app/gateway_tls/cert.pem
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       dashboard:
         condition: service_healthy
