@@ -303,7 +303,9 @@ def login_via_gateway_page(
         def is_authenticated() -> bool:
             deadline = time.monotonic() + config.api_timeout_sec
             while True:
-                client = CPGWClient(pw_page.cookie_header(), port=port, host="127.0.0.1")
+                client = CPGWClient(
+                    pw_page.cookie_header(), port=port, host="127.0.0.1", ca_file=config.cert_file
+                )
                 try:
                     if client.auth_status().get("authenticated"):
                         return True
