@@ -177,7 +177,7 @@ Universe (`sleeves.sentiment.universe`): SPY, QQQ, AAPL, MSFT, NVDA, TSLA, AMZN,
 
 ### Data
 
-`live/sentiment_worker.py` polls once per `sentiment_provider.poll_interval_sec` (3600 seconds) and writes rows to the `sentiment` table. The symbols come from `sleeves.sentiment.universe`, not from `sentiment_provider.symbols`. With `provider: alpha_vantage` it makes one Alpha Vantage `NEWS_SENTIMENT` call for all symbols, with `limit=100` articles.
+`live/sentiment_worker.py` polls once per `sentiment_provider.poll_interval_sec` (3600 seconds) and writes rows to the `sentiment` table. The symbols come from `sleeves.sentiment.universe`, not from `sentiment_provider.symbols`. With `provider: alpha_vantage` it makes one Alpha Vantage `NEWS_SENTIMENT` call for all symbols, with `limit=100` articles published in the last 24 hours (`time_from`, from `AlphaVantageProvider.lookback_hours`).
 
 Per ticker:
 
@@ -316,12 +316,6 @@ These are places where the code does not match the intent in the YAML, or where 
 
 - **The tactical sleeve is not wired into the portfolio runner.** `TacticalSleeve`, `fuse` and `size_portfolio` are not called by any runner. `live/runner.py` uses a fixed quantity and no fusion.
 - **Static starting equity.** Sleeve budgets come from `portfolio.starting_equity`, not from the live account value.
-
-Smaller code notes:
-
-- `AlphaVantageProvider.lookback_hours` is stored but never sent to the API.
-- `size_portfolio` iterates `signals` twice. A generator would give an empty result after gross capping. `TacticalSleeve.decide` passes a list, so it works today.
-- `core/macro.py` uses `datetime.utcnow()`, which is deprecated since Python 3.12.
 
 ---
 
