@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,21 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+
+class SentimentDataUnavailable(RuntimeError):
+    """The provider answered, but without data (premium endpoint, throttle, API error)."""
+
+
+_APIKEY_RE = re.compile(r"apikey=[^&\s'\"]*", re.IGNORECASE)
+
+
+def scrub_secrets(text: str, api_key: str | None = None) -> str:
+    """Remove `apikey=...` fragments and the literal key from a message."""
+    out = _APIKEY_RE.sub("[key removed]", text)
+    if api_key:
+        out = out.replace(api_key, "[key removed]")
+    return out
 
 
 @dataclass
@@ -141,12 +157,17 @@ class AlphaVantageProvider:
             with urlopen(req, timeout=self.TIMEOUT_SEC) as resp:
                 payload = json.loads(resp.read())
         except (URLError, HTTPError, json.JSONDecodeError, TimeoutError) as e:
-            # Worker will log + retry next cycle
-            raise RuntimeError(f"Alpha Vantage request failed: {e}") from e
+            # Worker will log + retry next cycle. The message is scrubbed because some
+            # errors quote the request URL, which holds the API key.
+            msg = scrub_secrets(f"Alpha Vantage request failed: {e}", self.api_key)
+            raise RuntimeError(msg) from None
 
-        # Free tier rate limit gives a `Note` field instead of `feed`
-        if "Note" in payload or "Information" in payload:
-            raise RuntimeError(f"Alpha Vantage throttled: {payload}")
+        # Throttle or premium notices arrive as `Note` or `Information` instead of `feed`.
+        # Keep the API's text, never the URL or the payload dict.
+        for field in ("Note", "Information", "Error Message"):
+            if field in payload:
+                text = scrub_secrets(str(payload[field]), self.api_key)
+                raise SentimentDataUnavailable(f"Alpha Vantage throttled ({field}): {text}")
 
         feed = payload.get("feed", []) or []
         return self._aggregate(symbols, feed)
