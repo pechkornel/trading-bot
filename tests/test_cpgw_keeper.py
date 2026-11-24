@@ -204,6 +204,27 @@ def test_env_password_refuses_to_start_without_echoing_it(env, monkeypatch):
     assert "IBKR_PASSWORD" in str(info.value)
 
 
+def test_password_in_dotenv_file_refuses_to_start_without_echoing_it(env, monkeypatch, tmp_path):
+    from dotenv import dotenv_values
+
+    dotenv_file = tmp_path / "fake.env"
+    dotenv_file.write_text("IBKR_PASSWORD=dotenv-pass-4k4k\n")
+
+    def fake_load_dotenv(*args, **kwargs):
+        # Behaves like the real load_dotenv, but reads the temp file instead of ROOT/.env.
+        for key, value in dotenv_values(dotenv_file).items():
+            monkeypatch.setenv(key, value or "")
+        return True
+
+    monkeypatch.setattr("core.config.load_dotenv", fake_load_dotenv)
+    with pytest.raises(RuntimeError) as info:
+        env.keeper()
+    text = "".join(traceback.format_exception(info.value)) + str(info.value) + repr(info.value)
+    assert "dotenv-pass-4k4k" not in text
+    assert ".env" in str(info.value)
+    assert "IBKR_PASSWORD" in str(info.value)
+
+
 def test_banner_masks_username(env, capsys):
     keeper = env.keeper()
     keeper.client.authenticated = True

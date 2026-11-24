@@ -134,19 +134,20 @@ class Keeper:
         sleep: Callable[[float], None] | None = None,
         install_signals: bool = True,
     ) -> None:
-        # The password must only ever come from the secret file. Refuse before reading
-        # anything else, and never put the value in the message.
-        if os.environ.get("IBKR_PASSWORD"):
-            raise RuntimeError(
-                "IBKR_PASSWORD is set in the environment. Remove it from .env and the "
-                "container environment: the keeper reads credentials from the secret file "
-                "only (secrets/ibkr_login, see secrets/README.md)."
-            )
         self.once = once
         self.stopped = False
         self.cfg = keeper_cfg or load_keeper_config()
 
+        # load_app_config reads ROOT/.env into os.environ, so the refusal must come after
+        # it: a password in .env would otherwise slip through. Never put the value in the
+        # message.
         app_cfg = load_app_config()
+        if os.environ.get("IBKR_PASSWORD"):
+            raise RuntimeError(
+                "IBKR_PASSWORD is set in the environment or in .env. Remove it from .env and "
+                "the container environment: the keeper reads credentials from the secret "
+                "file only (secrets/ibkr_login, see secrets/README.md)."
+            )
         assert_paper_mode(app_cfg)  # hard paper-only lock, same as everywhere else
         self.cpgw_port = app_cfg.ib.port
         self.creds: IbkrCredentials = load_login_secrets()
