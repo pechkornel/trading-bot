@@ -161,3 +161,16 @@ def test_runner_dry_run_with_other_account_still_starts(monkeypatch):
     r = make_single(dry_run=True)
     r.start()
     assert r.client.account_id == "U7654321"
+
+
+@pytest.mark.parametrize("prefix", ["", "   ", None])
+def test_guard_never_fails_open_on_an_empty_prefix(monkeypatch, prefix):
+    # startswith("") is always true; an empty or blank prefix must refuse, not allow.
+    import live.account_guard as guard
+
+    if prefix is None:
+        monkeypatch.setattr(
+            guard, "load_keeper_config", lambda: SimpleNamespace(paper_account_prefix="")
+        )
+    with pytest.raises(RuntimeError, match="--live refused"):
+        guard.require_paper_account_for_live("U1234567", dry_run=False, prefix=prefix)

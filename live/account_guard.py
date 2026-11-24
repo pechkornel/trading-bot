@@ -20,7 +20,9 @@ def require_paper_account_for_live(
     if dry_run:
         return
     wanted = prefix if prefix is not None else load_keeper_config().paper_account_prefix
-    if isinstance(account_id, str) and account_id.startswith(wanted):
+    # startswith("") is always true, so an empty or blank prefix must never allow --live.
+    usable = isinstance(wanted, str) and bool(wanted.strip())
+    if usable and isinstance(account_id, str) and account_id.startswith(wanted):
         return
     if isinstance(account_id, str) and account_id:
         shown = "***" + account_id[-2:]
