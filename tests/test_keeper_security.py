@@ -61,7 +61,7 @@ def test_stale_cookie_401_but_cookieless_check_authenticated_means_no_login(env)
 
 @pytest.mark.parametrize(
     "answer",
-    [CPGWError("boom"), NotAuthenticatedError("401"), None, {"connected": True}, "junk"],
+    [CPGWError("boom"), None, {"connected": True}, "junk"],
 )
 def test_inconclusive_cookieless_check_means_no_submit(env, answer):
     keeper, probe = keeper_with_probe(env, answer)
@@ -69,6 +69,40 @@ def test_inconclusive_cookieless_check_means_no_submit(env, answer):
     assert probe.calls == 1
     assert env.login_calls == 0
     assert env.state().failed_attempts == []
+
+
+def test_cookieless_401_means_not_authenticated_and_allows_login(env):
+    # Changed on purpose: a 401 used to be inconclusive. A gateway that answers 401 when
+    # nobody is logged in would then never be logged in. An explicit 401 now allows login.
+    keeper, probe = keeper_with_probe(env, NotAuthenticatedError("401"))
+    keeper.tick()
+    assert probe.calls == 1
+    assert env.login_calls == 1
+
+
+def test_unsure_ticks_warn_once_then_alert_once_after_threshold(env):
+    keeper, probe = keeper_with_probe(env, CPGWError("5xx"))
+    for _ in range(12):
+        keeper.tick()
+    assert env.login_calls == 0
+    warns = [m for lvl, _, m in env.storage.events if lvl == "warn" and "no clear answer" in m]
+    errors = [m for lvl, _, m in env.storage.events if lvl == "error" and "no clear answer" in m]
+    assert len(warns) == 1
+    assert len(errors) == 1
+    alerts = [n for n in env.notifier.sent if n["key"] == "gateway_unsure"]
+    assert len(alerts) == 1
+
+
+def test_unsure_counter_resets_when_the_check_becomes_clear(env):
+    keeper, probe = keeper_with_probe(env, CPGWError("5xx"))
+    for _ in range(3):
+        keeper.tick()
+    probe.answer = {"authenticated": True}
+    keeper.tick()
+    probe.answer = CPGWError("5xx")
+    for _ in range(3):
+        keeper.tick()
+    assert [n for n in env.notifier.sent if n["key"] == "gateway_unsure"] == []
 
 
 def test_explicit_not_authenticated_cookieless_check_allows_login(env):

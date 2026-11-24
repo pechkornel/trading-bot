@@ -56,6 +56,7 @@ KEEPER_STATE_FILE = LOGS_DIR / "keeper_state.json"
 
 GATEWAY_DOWN_ALERT_AFTER_SEC = 300
 LOCKOUT_REMINDER_SEC = 86400
+UNSURE_ALERT_AFTER_TICKS = 5
 SOURCE = "cpgw_keeper"
 
 
@@ -175,6 +176,8 @@ class Keeper:
         self._down_since: datetime | None = None
         self._last_down_alert: datetime | None = None
         self._last_wait: tuple[str, datetime | None] | None = None
+        self._unsure_ticks = 0
+        self._last_unsure_alert: datetime | None = None
 
     # ---- output helpers (everything passes the Redactor) ----
 
@@ -277,8 +280,8 @@ class Keeper:
 
         The first check uses the stored cookie. A lost or stale session file would make it
         say "not authenticated" while the gateway holds a live session for another cookie,
-        so a second check runs with no cookie. Only an explicit "authenticated: false"
-        from that second check allows a login; anything else means do not submit."""
+        so a second check runs with no cookie. Only an explicit "authenticated: false" or an
+        explicit 401 from that second check allows a login; anything else means do not submit."""
         try:
             if (self.client.auth_status() or {}).get("authenticated"):
                 return "authenticated"
@@ -293,7 +296,9 @@ class Keeper:
         try:
             probe = self._probe_factory(self.cpgw_port)
             answer = probe.auth_status()
-        except Exception:  # noqa: BLE001 - any error, including a 401, is inconclusive
+        except NotAuthenticatedError:
+            return "ok"  # an explicit 401 with no cookie: nobody is logged in
+        except Exception:  # noqa: BLE001 - network error, 5xx and anything else: unsure
             return "unsure"
         finally:
             if probe is not None:
@@ -316,6 +321,8 @@ class Keeper:
         self._adopt_if_authenticated(obs, now)
         action = policy.decide(self.state, obs, now, self.cfg)
 
+        if action.kind is not ActionKind.LOGIN:
+            self._clear_unsure()
         if action.kind is ActionKind.TICKLE:
             self._last_wait = None
         elif action.kind is ActionKind.WAIT:
@@ -412,6 +419,8 @@ class Keeper:
 
     def _on_login(self, action: policy.Action, now: datetime) -> None:
         gateway = self._gateway_state_before_login()
+        if gateway != "unsure":
+            self._clear_unsure()
         if gateway == "authenticated":
             self._event("info", "gateway became authenticated before login; skipping login")
             return
@@ -419,11 +428,7 @@ class Keeper:
             self._event("warn", "gateway not reachable right before login; skipping login")
             return
         if gateway == "unsure":
-            self._event(
-                "warn",
-                "the cookie-less gateway check gave no clear answer right before login; "
-                "skipping login (waiting)",
-            )
+            self._on_unsure(now)
             return
         cooldown = self.cfg.session_lost_alert_cooldown_sec
         if action.expected:
@@ -438,6 +443,36 @@ class Keeper:
                 "warn", "session lost, logging in again", key="session_lost", cooldown_sec=cooldown
             )
         self._full_login(now)
+
+    def _clear_unsure(self) -> None:
+        self._unsure_ticks = 0
+        self._last_unsure_alert = None
+
+    def _on_unsure(self, now: datetime) -> None:
+        """The cookie-less check gave no clear answer: never log in, but do not spam.
+
+        One warn when it starts. After UNSURE_ALERT_AFTER_TICKS in a row, one error event
+        and one deduped alert, repeated only after the alert cooldown."""
+        self._unsure_ticks += 1
+        if self._unsure_ticks == 1:
+            self._event(
+                "warn",
+                "the cookie-less gateway check gave no clear answer right before login; "
+                "skipping login (waiting)",
+            )
+        if self._unsure_ticks < UNSURE_ALERT_AFTER_TICKS:
+            return
+        cooldown = self.cfg.session_lost_alert_cooldown_sec
+        last = self._last_unsure_alert
+        if last is not None and (now - last).total_seconds() < cooldown:
+            return
+        self._last_unsure_alert = now
+        text = (
+            f"the gateway gave no clear login state for {self._unsure_ticks} checks in a row, "
+            "so the keeper is not logging in. Check the ibkr_gateway container and its logs."
+        )
+        self._event("error", f"no clear answer from the cookie-less gateway check: {text}")
+        self._alert("error", text, key="gateway_unsure", cooldown_sec=cooldown)
 
     def _on_submit(self) -> None:
         """Called by the login flow right before the form is submitted.
