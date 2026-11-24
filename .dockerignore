@@ -15,3 +15,5 @@ docs/
 README.md
 deploy/README.md
 data/
+secrets/
+vendor/
