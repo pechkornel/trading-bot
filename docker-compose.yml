@@ -6,14 +6,19 @@
 #   - `cpgw_keeper`   — auto profile; SRP login + /tickle keepalive
 #   - `portfolio`     — auto profile; multi-sleeve runner, depends on the keeper
 #   - `sentiment`     — auto profile; news/sentiment poller
+#   - `ibkr_gateway`  - gateway profile; IBKR Client Portal Gateway (pinned native
+#                       executable) on its own bridge network, published on
+#                       127.0.0.1:5000 only
 #
 # Usage:
 #   docker compose up -d                       # dashboard only
 #   docker compose --profile auto up -d        # dashboard + keeper + portfolio + sentiment
+#   docker compose --profile gateway up -d     # the gateway container only
 #
-# Phase 7+: CPGW (Client Portal Gateway) runs on the HOST as a separate service —
-# it's IBKR's Java daemon listening on port 5000. `network_mode: host` lets the
-# containers reach https://localhost:5000 directly.
+# CPGW (Client Portal Gateway) can run here (profile `gateway`) or on the HOST as
+# a separate service (IBKR's Java daemon on port 5000). Use one or the other, both
+# want port 5000. `network_mode: host` lets the bot containers reach
+# https://localhost:5000 either way.
 #
 # Required in .env:
 #   IBKR_USERNAME, IBKR_PASSWORD   — used by cpgw_keeper for SRP login
@@ -94,3 +99,24 @@ services:
     depends_on:
       dashboard:
         condition: service_healthy
+
+  ibkr_gateway:
+    build:
+      context: docker/gateway
+    image: tradingbot-ibkr-gateway:v1.0.0
+    container_name: tradingbot-ibkr-gateway
+    profiles: ["gateway"]
+    restart: unless-stopped
+    networks: [ibkr_gateway]
+    ports:
+      - "127.0.0.1:5000:5000"   # loopback only, never "5000:5000"
+    volumes:
+      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/root/conf.yaml:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  ibkr_gateway:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
