@@ -66,6 +66,7 @@ from core.sleeves import (
     SentimentInput,
     SentimentSatelliteSleeve,
 )
+from live.account_equity import format_equity_event, resolve_total_equity
 from live.cpgw_keeper import read_session
 from live.storage import Storage
 
@@ -145,6 +146,13 @@ class PortfolioRunner:
             " · ".join(f"{name} ${total_eq * pct:,.0f} ({pct:.0%})" for name, pct in active)
             or "(none enabled)"
         )
+        if self.portfolio_cfg.use_account_equity:
+            active_str = (
+                f"budget base starting_equity ${total_eq:,.0f} "
+                f"(net liquidation per cycle when valid) · {active_str}"
+            )
+        else:
+            active_str = f"budget base starting_equity ${total_eq:,.0f} (fixed) · {active_str}"
         banner = (
             f"PHASE 8 PORTFOLIO · PAPER · port {self.app_cfg.ib.port} · "
             f"{active_str} · cycle={self.interval}s · dry_run={self.dry_run}"
@@ -211,7 +219,16 @@ class PortfolioRunner:
             self.client.update_cookie(session["cookie"])
 
         cycle_id = uuid.uuid4().hex[:12]
-        total_equity = self.portfolio_cfg.starting_equity
+        # One equity reading per cycle, shared by both sleeves.
+        reading = resolve_total_equity(self.client, self.portfolio_cfg)
+        equity_note = f"cycle={cycle_id} {format_equity_event(reading)}"
+        deliberate = reading.reason.startswith("disabled")
+        level = "info" if reading.source == "gateway" or deliberate else "warn"
+        self.storage.log_event(level, "portfolio", equity_note)
+        print(f"[portfolio] {equity_note}")
+        if reading.source == "gateway":
+            self.storage.log_equity(reading.equity)
+        total_equity = reading.equity
         now = datetime.now(timezone.utc)  # one clock for the whole cycle
         ms = market_state(now)
 
