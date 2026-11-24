@@ -32,3 +32,20 @@ def make_frames(
         for sym, first in first_dates.items():
             adj.loc[adj.index < pd.Timestamp(first), sym] = float("nan")
     return adj.copy(), adj
+
+
+def small_cfg(**overrides):
+    """Short-lookback core config (momentum 10, MA 5) so tests need a few dozen rows."""
+    from core.config import CoreSleeveConfig
+
+    fields = dict(
+        universe=["SPY", "TLT", "GLD"],
+        hold_top_n=2,
+        momentum_lookback_days=10,
+        trend_ma_days=5,
+        risk_off_spy_ma_days=5,
+        risk_off_universe=["TLT", "IEF"],
+        drift_threshold=1.0,
+    )
+    fields.update(overrides)
+    return CoreSleeveConfig(**fields)
