@@ -19,7 +19,7 @@ from __future__ import annotations
 import io
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -55,7 +55,7 @@ class MacroSnapshot:
     credit_ratio: float | None
     credit_ratio_trend_60d: float | None  # pct change vs 60d ago
 
-    # When this snapshot was assembled
+    # When this snapshot was assembled (timezone-aware UTC)
     as_of: datetime
 
     # Raw flag — True if every field is populated, False if any were missing
@@ -119,7 +119,7 @@ class MacroFetcher:
             dxy_trend_60d=_pct_change_60d(dxy),
             credit_ratio=_last(credit),
             credit_ratio_trend_60d=_pct_change_60d(credit),
-            as_of=datetime.utcnow(),
+            as_of=datetime.now(timezone.utc),
             complete=all(s is not None and len(s) > 0 for s in (yc, ff, vix, dxy, hyg, lqd)),
         )
         return snap
