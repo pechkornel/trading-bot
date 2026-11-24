@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (178 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (179 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI (#4).
 - `backtest/` package and `requirements-backtest.txt`: replays the live core sleeve from 2008 against SPY, 60/40 and equal weight, with ablations. `python -m backtest.run` writes `docs/backtest/` (results, chart, JSON); the README has a Results section and `docs/adr/0002-own-backtest-replay.md` records the design.
@@ -40,16 +40,16 @@ All notable changes to this project are documented here. The format follows
   **Upgrade note:** existing systemd installs at `/home/USER/trading-bot/bot` should either move the clone to `/opt/trading-bot` or edit the paths in each unit after copying it.
 - systemd units use `ProtectSystem=strict`, so only `logs/` and `models/artifacts/` are writable. Run `mkdir -p logs` before the first start.
 - systemd ordering (`After=`/`Wants=`) now names the templated units (`tradingbot-*@%i.service`).
-- Alpha Vantage requests now send `time_from`, so sentiment covers the last `lookback_hours`, now 24 by default (was 6, never sent). Fewer articles on quiet days (#10).
-- The README "Run it" section uses uv (#13).
+- The `AlphaVantageProvider.lookback_hours` default is now 24 (was 6). It is now sent as `time_from`, so fewer articles arrive on quiet days and the satellite may skip more symbols on `min_article_count` (#10).
 
 ### Fixed
 
 - The satellite hold timer counts NYSE trading days instead of calendar days, so `hold_max_days` matches its meaning (#7).
 - US Eastern time uses the `America/New_York` zone, so the market state is correct on the DST change days. Holidays and early closes are known (#15).
 - `size_portfolio` no longer returns no decisions for a generator input when the gross cap applies (#9).
-- `AlphaVantageProvider.lookback_hours` is sent to the API instead of being ignored (#10).
+- `AlphaVantageProvider.lookback_hours` is sent to the API as `time_from` instead of being ignored (#10).
 - `MacroSnapshot.as_of` is timezone-aware UTC instead of the deprecated `datetime.utcnow()` (#11).
+- The README "Run it" section uses uv instead of `python -m venv` and pip (#13).
 - The core weekday and once-per-day checks use the US Eastern date instead of UTC, so the weekly rebalance runs on the first Friday cycle in Eastern time and no longer on Thursday evening (#5).
 - `portfolio.reentry_cooldown_sec` is enforced for the core and sentiment sleeves: a symbol a sleeve sold to 0 shares is not bought back by that sleeve for 24 hours. Top-ups and sells are never blocked (#6).
 - Satellite skip reasons have no leading space (#16).
