@@ -17,6 +17,7 @@ _ENV_KEYS = (
     "IB_CLIENT_ID",
     "DRY_RUN",
     "ALPHA_VANTAGE_API_KEY",
+    "SENTIMENT_PROVIDER",
 )
 
 

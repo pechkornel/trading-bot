@@ -364,8 +364,21 @@ def load_macro_config() -> MacroConfig:
     return MacroConfig(**raw)
 
 
+_SENTIMENT_PROVIDERS = ("stub", "alpha_vantage")
+
+
 def load_sentiment_config() -> SentimentConfig:
+    load_dotenv(ROOT / ".env")
     data = _load_yaml(CONFIG_DIR / "symbols.yaml")
     # New key in Phase 8 is `sentiment_provider`; fall back to legacy `sentiment` block
-    raw = data.get("sentiment_provider") or data.get("sentiment") or {}
+    raw = dict(data.get("sentiment_provider") or data.get("sentiment") or {})
+    # SENTIMENT_PROVIDER in .env wins over the YAML; empty or unset keeps the YAML
+    override = os.getenv("SENTIMENT_PROVIDER", "").strip().lower()
+    if override:
+        if override not in _SENTIMENT_PROVIDERS:
+            raise ValueError(
+                f"SENTIMENT_PROVIDER={override!r} is not valid, "
+                f"use one of {', '.join(_SENTIMENT_PROVIDERS)} (or leave it empty)"
+            )
+        raw["provider"] = override
     return SentimentConfig(**raw)
