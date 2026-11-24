@@ -10,7 +10,17 @@ The bot is paper-trading only. Orders are sent only when a runner is started wit
 
 ## 1. Portfolio split
 
-Total equity is the static value `portfolio.starting_equity` (100,000). It is not the live IBKR account value. Each sleeve gets `starting_equity * allocation_pct`.
+Total equity is the paper account's net liquidation value, read from the Client Portal Gateway once per cycle (`live/account_equity.py`). When that value is missing or invalid, total equity is `portfolio.starting_equity` (100,000). Each sleeve gets `total equity * allocation_pct`. The figures below use 100,000.
+
+The gateway value is rejected, and `starting_equity` is used, when:
+
+- `portfolio.use_account_equity` is false.
+- The gateway does not answer, is not logged in, or the summary has no usable `netliquidation` amount.
+- The value is not finite or not positive.
+- The currency is present and differs from `portfolio.equity_currency` (USD). A missing currency is accepted.
+- The value is outside `equity_min_ratio` to `equity_max_ratio` times `starting_equity` (0.25x to 4x, bounds inclusive, so 25,000 to 400,000). A fresh paper account of 1,000,000 is rejected for this reason.
+
+Dry runs read the account value too. Each cycle writes one `portfolio` event that says which value was used, for example `equity: net liquidation 123,456.78 USD (gateway)` or `equity: starting_equity 100,000.00 (fallback: <reason>)`. A fallback is logged at `warn` level, except the deliberate `use_account_equity: false`, which is `info`. Gateway readings are also written to the `equity` table (shown at `/api/equity`). Fallbacks are not.
 
 | Sleeve | Key | Enabled | Allocation | Budget |
 |---|---|---|---|---|
@@ -21,7 +31,7 @@ Total equity is the static value `portfolio.starting_equity` (100,000). It is no
 The remaining 10% (10,000) is never traded.
 
 ```
-Total equity  100,000  (static starting_equity)
+Total equity  100,000  (net liquidation, else starting_equity)
 |
 +-- core       70%  70,000  macro + trend + momentum, weekly or on drift
 +-- sentiment  20%  20,000  news sentiment longs, short holds
@@ -315,7 +325,6 @@ Defaults from `core/config.py` are `rr_ratio = 4.0` and `atr_multiplier = 2.0`. 
 These are places where the code does not match the intent in the YAML, or where a feature is missing. This file documents the current behaviour.
 
 - **The tactical sleeve is not wired into the portfolio runner.** `TacticalSleeve`, `fuse` and `size_portfolio` are not called by any runner. `live/runner.py` uses a fixed quantity and no fusion.
-- **Static starting equity.** Sleeve budgets come from `portfolio.starting_equity`, not from the live account value.
 
 ---
 
@@ -326,7 +335,11 @@ Most settings are in `config/symbols.yaml`.
 | You want to | Edit |
 |---|---|
 | Move money between sleeves | `sleeves.core.allocation_pct`, `sleeves.sentiment.allocation_pct`, `sleeves.tactical.allocation_pct` |
-| Change the total budget | `portfolio.starting_equity` |
+| Change the fallback budget and the anchor of the range check | `portfolio.starting_equity` |
+| Size from a 1,000,000 paper account | Set `portfolio.starting_equity: 1000000` (otherwise 1,000,000 is more than 4x the default and is rejected) |
+| Turn account equity sizing off | `portfolio.use_account_equity: false` (always use `starting_equity`) |
+| Change the accepted account value range | `portfolio.equity_min_ratio` (0.25), `portfolio.equity_max_ratio` (4.0), as multiples of `starting_equity` |
+| Change the expected account currency | `portfolio.equity_currency` (USD) |
 | Change cycle frequency | `portfolio.cycle_interval_sec` |
 | Change the core universe | `sleeves.core.universe`. Each symbol needs a `universe.<symbol>:` block and a bucket in `ASSET_BUCKET` in `core/scoring.py`. |
 | Hold more or fewer core assets | `sleeves.core.hold_top_n` |
