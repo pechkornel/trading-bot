@@ -246,5 +246,6 @@ def test_import_engine_without_yfinance_or_matplotlib(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "yfinance", None)
     monkeypatch.setitem(sys.modules, "matplotlib", None)
-    sys.modules.pop("backtest.engine", None)
+    # monkeypatch restores the real module afterwards (raising=False: it may not be loaded)
+    monkeypatch.delitem(sys.modules, "backtest.engine", raising=False)
     importlib.import_module("backtest.engine")
