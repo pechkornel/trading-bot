@@ -58,6 +58,22 @@ def nyse_calendar() -> xcals.ExchangeCalendar:
     return _nyse(datetime.now(timezone.utc).year + 2)
 
 
+def trading_days_between(start: datetime, end: datetime) -> int:
+    """Number of NYSE session closes after `start` and at or before `end`.
+
+    The close is inclusive, and an early close counts as a full day. Naive input
+    is treated as UTC. Returns 0 when `end <= start`."""
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    if end <= start:
+        return 0
+    closes = nyse_calendar().closes
+    lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+    return int(((closes > lo) & (closes <= hi)).sum())
+
+
 # ---- regime detection ----
 
 

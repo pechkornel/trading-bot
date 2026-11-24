@@ -10,6 +10,9 @@ from core.sleeves.sentiment_satellite import (
 )
 
 NOW = datetime(2026, 11, 13, 12, tzinfo=timezone.utc)
+# Entry times that are exactly 10 and 9 NYSE sessions before NOW.
+TEN_SESSIONS = datetime(2026, 10, 30, 14, tzinfo=timezone.utc)
+NINE_SESSIONS = datetime(2026, 11, 2, 15, 30, tzinfo=timezone.utc)
 
 
 def make_sleeve(reentry_cooldown_sec=0, **overrides) -> SentimentSatelliteSleeve:
@@ -29,21 +32,17 @@ def inp(symbol="AAPL", score=0.6, count=6, price=100.0) -> SentimentInput:
     )
 
 
-def pos(symbol="AAPL", shares=10, entry=100.0, age_days=1) -> Position:
-    return Position(
-        symbol=symbol,
-        shares=shares,
-        entry_price=entry,
-        opened_at=NOW - timedelta(days=age_days),
-    )
+def pos(symbol="AAPL", shares=10, entry=100.0, opened_at=NOW - timedelta(days=1)) -> Position:
+    # The default is 1 session before NOW.
+    return Position(symbol=symbol, shares=shares, entry_price=entry, opened_at=opened_at)
 
 
-def run(inputs, positions=None, equity=20_000.0, sleeve=None, **kwargs):
+def run(inputs, positions=None, equity=20_000.0, sleeve=None, now=NOW, **kwargs):
     return (sleeve or make_sleeve()).evaluate(
         inputs={i.symbol: i for i in inputs},
         positions=positions or {},
         sleeve_equity=equity,
-        now=NOW,
+        now=now,
         **kwargs,
     )
 
@@ -145,21 +144,40 @@ def test_allow_entries_false_blocks_entries():
 # ---- exits ----
 
 
-def test_exit_by_timer_at_ten_days():
-    result = run([inp(score=0.0)], positions={"AAPL": pos(age_days=10)})
+def test_exit_by_timer_at_ten_sessions():
+    result = run([inp(score=0.0)], positions={"AAPL": pos(opened_at=TEN_SESSIONS)})
     assert [e.symbol for e in result.exits] == ["AAPL"]
-    assert result.exits[0].reason.startswith("hold timer")
+    assert result.exits[0].reason == "hold timer: 10 trading days >= 10 max"
 
 
-def test_nine_day_old_position_stays():
-    result = run([inp(score=0.0)], positions={"AAPL": pos(age_days=9)})
+def test_nine_session_old_position_stays():
+    result = run([inp(score=0.0)], positions={"AAPL": pos(opened_at=NINE_SESSIONS)})
     assert result.exits == []
 
 
 def test_naive_opened_at_is_treated_as_utc():
-    naive = Position("AAPL", 10, 100.0, (NOW - timedelta(days=10)).replace(tzinfo=None))
+    naive = Position("AAPL", 10, 100.0, TEN_SESSIONS.replace(tzinfo=None))
     result = run([inp(score=0.0)], positions={"AAPL": naive})
     assert len(result.exits) == 1
+
+
+def test_friday_entry_does_not_exit_after_ten_calendar_days():
+    friday = datetime(2026, 11, 20, 15, tzinfo=timezone.utc)
+    held = {"AAPL": pos(opened_at=friday)}
+    flat = [inp(score=0.0)]
+    # 10 calendar days later, but only 5 sessions (Thanksgiving week).
+    assert (
+        run(flat, positions=held, now=datetime(2026, 11, 30, 15, tzinfo=timezone.utc)).exits == []
+    )
+    # 9 sessions, one minute before the close.
+    assert (
+        run(flat, positions=held, now=datetime(2026, 12, 4, 20, 59, tzinfo=timezone.utc)).exits
+        == []
+    )
+    # 10 sessions at the close.
+    result = run(flat, positions=held, now=datetime(2026, 12, 4, 21, tzinfo=timezone.utc))
+    assert [e.symbol for e in result.exits] == ["AAPL"]
+    assert result.exits[0].reason == "hold timer: 10 trading days >= 10 max"
 
 
 def test_exit_by_stop_at_five_percent_loss():
@@ -175,13 +193,13 @@ def test_small_loss_does_not_stop_out():
 
 
 def test_exit_without_input_uses_entry_price():
-    result = run([], positions={"AAPL": pos(entry=123.0, age_days=10)})
+    result = run([], positions={"AAPL": pos(entry=123.0, opened_at=TEN_SESSIONS)})
     assert result.exits[0].price == 123.0
 
 
 def test_exit_frees_a_slot_for_one_new_entry():
     held = {s: pos(s) for s in ("SPY", "QQQ", "AAPL", "MSFT")}
-    held["SPY"] = pos("SPY", age_days=10)
+    held["SPY"] = pos("SPY", opened_at=TEN_SESSIONS)
     inputs = [inp("NVDA", score=0.9), inp("TSLA", score=0.8)]
     result = run(inputs, positions=held)
     assert [e.symbol for e in result.exits] == ["SPY"]
@@ -189,7 +207,9 @@ def test_exit_frees_a_slot_for_one_new_entry():
 
 
 def test_allow_exits_false_blocks_exits():
-    result = run([inp(score=0.0)], positions={"AAPL": pos(age_days=10)}, allow_exits=False)
+    result = run(
+        [inp(score=0.0)], positions={"AAPL": pos(opened_at=TEN_SESSIONS)}, allow_exits=False
+    )
     assert result.exits == []
 
 
@@ -197,7 +217,7 @@ def test_allow_exits_false_blocks_exits():
 
 
 def test_timer_exit_is_not_reentered_in_the_same_cycle():
-    result = run([inp("AAPL", score=0.9)], positions={"AAPL": pos(age_days=10)})
+    result = run([inp("AAPL", score=0.9)], positions={"AAPL": pos(opened_at=TEN_SESSIONS)})
     assert [e.symbol for e in result.exits] == ["AAPL"]
     assert result.entries == []
     assert ("AAPL", "exited this cycle") in result.skipped
@@ -215,7 +235,7 @@ def test_stop_exit_is_not_reentered_in_the_same_cycle():
 
 def test_freed_slot_goes_to_another_candidate():
     held = {s: pos(s) for s in ("SPY", "QQQ", "AAPL", "MSFT")}
-    held["SPY"] = pos("SPY", age_days=10)
+    held["SPY"] = pos("SPY", opened_at=TEN_SESSIONS)
     result = run([inp("SPY", score=0.95), inp("NVDA", score=0.9)], positions=held)
     assert [e.symbol for e in result.exits] == ["SPY"]
     assert [e.symbol for e in result.entries] == ["NVDA"]

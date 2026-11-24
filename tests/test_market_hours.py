@@ -14,6 +14,7 @@ from core.market_hours import (
     should_run_entries,
     should_run_exits,
     to_eastern,
+    trading_days_between,
 )
 
 
@@ -174,3 +175,55 @@ def test_holiday_gating_entries_off_exits_on():
     ms = market_state(_utc(2026, 11, 26, 15))
     assert should_run_entries(ms) is False
     assert should_run_exits(ms) is True
+
+
+# ---- trading_days_between ----
+
+
+def _utc(*args) -> datetime:
+    return datetime(*args, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    "start, end, expected",
+    [
+        # Ten sessions, Fri 2026-10-30 to Fri 2026-11-13 (close counted at 21:00 UTC).
+        (_utc(2026, 10, 30, 14), _utc(2026, 11, 13, 12), 10),
+        (_utc(2026, 11, 2, 15, 30), _utc(2026, 11, 13, 12), 9),
+        # Thanksgiving and the weekend are skipped, the 11-27 early close counts.
+        (_utc(2026, 11, 25, 15), _utc(2026, 11, 30, 15), 2),
+        # Christmas Eve early close counts, 12-25 and the weekend do not.
+        (_utc(2026, 12, 23, 15), _utc(2026, 12, 28, 15), 2),
+        # Good Friday 2026-04-03 is skipped.
+        (_utc(2026, 4, 2, 15), _utc(2026, 4, 6, 15), 1),
+        # Independence Day observed on Friday 2026-07-03.
+        (_utc(2026, 7, 2, 15), _utc(2026, 7, 7, 15), 2),
+    ],
+)
+def test_trading_days_between_around_holidays(start, end, expected):
+    assert trading_days_between(start, end) == expected
+
+
+def test_trading_days_between_close_is_inclusive():
+    start = _utc(2026, 11, 13, 15)
+    assert trading_days_between(start, _utc(2026, 11, 13, 20, 59)) == 0
+    assert trading_days_between(start, _utc(2026, 11, 13, 21)) == 1
+
+
+def test_trading_days_between_early_close_boundary():
+    start = _utc(2026, 11, 27, 15)
+    assert trading_days_between(start, _utc(2026, 11, 27, 17, 59)) == 0
+    assert trading_days_between(start, _utc(2026, 11, 27, 18)) == 1
+
+
+@pytest.mark.parametrize("delta", [timedelta(0), timedelta(days=-3)])
+def test_trading_days_between_end_not_after_start_is_zero(delta):
+    start = _utc(2026, 11, 13, 15)
+    assert trading_days_between(start, start + delta) == 0
+
+
+def test_trading_days_between_naive_inputs_are_utc():
+    start, end = _utc(2026, 10, 30, 14), _utc(2026, 11, 13, 12)
+    naive = trading_days_between(start.replace(tzinfo=None), end.replace(tzinfo=None))
+    assert naive == trading_days_between(start, end) == 10
+    assert trading_days_between(start.replace(tzinfo=None), end) == 10

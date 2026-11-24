@@ -9,7 +9,7 @@ This is the smaller, more reactive sleeve (20% of equity by default).
 
 Decision flow per cycle (only runs when market state permits):
 
-  EXITS first — any open position whose time-since-entry > hold_max_days
+  EXITS first — any open position held for >= hold_max_days NYSE trading days
                 OR whose current price is < entry × (1 - stop_loss_pct)
                 gets closed (or queued for next open if market is closed).
 
@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 from core.config import SentimentSatelliteConfig
+from core.market_hours import trading_days_between
 from core.sleeves.cooldown import cooldown_remaining, format_cooldown
 
 
@@ -70,7 +71,7 @@ class SatelliteExit:
     symbol: str
     shares: int
     price: float
-    reason: str  # "10-day hard exit" / "5% stop" / etc.
+    reason: str  # "hold timer: ..." / "stop: ..." / etc.
 
 
 @dataclass
@@ -208,13 +209,10 @@ class SentimentSatelliteSleeve:
     ) -> str | None:
         """Returns a reason if this position should exit now, else None."""
         # Hard time-based exit
-        if pos.opened_at.tzinfo is None:
-            opened = pos.opened_at.replace(tzinfo=timezone.utc)
-        else:
-            opened = pos.opened_at
-        age_days = (now - opened).days
-        if age_days >= self.cfg.hold_max_days:
-            return f"hold timer: {age_days}d >= {self.cfg.hold_max_days}d max"
+        # Age is counted in NYSE trading days (naive opened_at is UTC).
+        age = trading_days_between(pos.opened_at, now)
+        if age >= self.cfg.hold_max_days:
+            return f"hold timer: {age} trading days >= {self.cfg.hold_max_days} max"
 
         # Stop loss
         if inp is not None and pos.entry_price > 0:
