@@ -96,6 +96,92 @@ def calendar_year_returns(equity: pd.Series) -> dict[int, float]:
     return out
 
 
+BOOTSTRAP_BLOCK_DAYS = 63
+BOOTSTRAP_DRAWS = 2000
+BOOTSTRAP_SEED = 20240611
+
+
+def _sharpe_rows(x: np.ndarray) -> np.ndarray:
+    """Annualised Sharpe of each row of an excess-return matrix (NaN if a row is constant)."""
+    std = x.std(axis=1, ddof=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = x.mean(axis=1) / std * math.sqrt(TRADING_DAYS)
+    return np.where(std > 0, out, np.nan)
+
+
+def _interval(values: np.ndarray) -> tuple[float, float]:
+    lo, hi = np.nanpercentile(values, [2.5, 97.5])
+    return float(lo), float(hi)
+
+
+def bootstrap_sharpe(
+    strategy: pd.Series,
+    benchmarks: dict[str, pd.Series],
+    rf: pd.Series,
+    block: int = BOOTSTRAP_BLOCK_DAYS,
+    draws: int = BOOTSTRAP_DRAWS,
+    seed: int = BOOTSTRAP_SEED,
+) -> dict:
+    """Circular fixed-block bootstrap of daily excess returns.
+
+    Every draw resamples whole `block`-day blocks (random start, wrapping around the
+    end) and the same blocks are applied to the strategy and to every benchmark, so
+    differences are paired. Reports the 95% percentile interval of the strategy Sharpe
+    and of the Sharpe difference (strategy minus benchmark), and the share of draws in
+    which the strategy Sharpe is strictly higher. Deterministic for a given seed.
+    """
+    cols = {"strategy": strategy, **benchmarks}
+    frame = pd.concat(cols, axis=1).dropna()
+    frame = frame.sub(rf.reindex(frame.index), axis=0).dropna()
+    n = len(frame)
+    if n < 2 * block:
+        raise ValueError(f"need at least {2 * block} aligned returns, got {n}")
+    rng = np.random.default_rng(seed)
+    n_blocks = math.ceil(n / block)
+    starts = rng.integers(0, n, size=(draws, n_blocks))
+    idx = ((starts[:, :, None] + np.arange(block)) % n).reshape(draws, -1)[:, :n]
+    values = frame.to_numpy(dtype=float)
+    sharpes = {name: _sharpe_rows(values[:, j][idx]) for j, name in enumerate(frame.columns)}
+    point = {
+        name: float(frame[name].mean() / frame[name].std(ddof=1) * math.sqrt(TRADING_DAYS))
+        for name in frame.columns
+    }
+    lo, hi = _interval(sharpes["strategy"])
+    out: dict = {
+        "block_days": block,
+        "draws": draws,
+        "seed": seed,
+        "days": n,
+        "strategy_sharpe": {"point": point["strategy"], "lo": lo, "hi": hi},
+        "vs": {},
+    }
+    for name in benchmarks:
+        diff = sharpes["strategy"] - sharpes[name]
+        d_lo, d_hi = _interval(diff)
+        out["vs"][name] = {
+            "diff_point": point["strategy"] - point[name],
+            "lo": d_lo,
+            "hi": d_hi,
+            "share_better": float(np.mean(diff[~np.isnan(diff)] > 0)),
+        }
+    return out
+
+
+def subperiod_stats(
+    returns: pd.Series, rf: pd.Series, periods: list[tuple[str, int, int]]
+) -> dict[str, dict]:
+    """CAGR (252 day basis) and Sharpe over calendar-year ranges (label, first, last year)."""
+    out: dict[str, dict] = {}
+    for label, first, last in periods:
+        part = returns[(returns.index.year >= first) & (returns.index.year <= last)]
+        if len(part) < 2:
+            out[label] = {"days": int(len(part)), "cagr": None, "sharpe": None}
+            continue
+        growth = float((1.0 + part).prod() ** (TRADING_DAYS / len(part)) - 1.0)
+        out[label] = {"days": int(len(part)), "cagr": growth, "sharpe": sharpe(part, rf)}
+    return out
+
+
 def _iso(label: Any) -> str | None:
     if label is None:
         return None

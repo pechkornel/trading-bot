@@ -145,6 +145,88 @@ def _metric_row(label: str, m: dict) -> list[str]:
     ]
 
 
+def _weekday_section(results: dict) -> list[str]:
+    out = ["## Rebalance weekday sensitivity", ""]
+    out += [
+        f"Base config at {results['base_cost_bps']:g} bps, changing only the weekday of the "
+        "weekly rebalance (0 = Monday to 4 = Friday). The weekday set in the live config is "
+        "marked. The strategy decides at that day's close and fills at the next trading day's "
+        "close.",
+        "",
+    ]
+    rows = []
+    for key, w in results["weekday_sensitivity"].items():
+        label = f"{w['name']} (live)" if w["live"] else w["name"]
+        rows.append(
+            [
+                f"{key} {label}",
+                _pct(w["cagr"]),
+                _pct(w["volatility"]),
+                _num(w["sharpe"]),
+                _pct(w["max_drawdown"]),
+            ]
+        )
+    return [*out, *_table(["Weekday", "CAGR", "Volatility", "Sharpe", "Max drawdown"], rows)]
+
+
+def _subperiod_section(results: dict) -> list[str]:
+    out = ["## Subperiods", ""]
+    out += [
+        "CAGR and Sharpe over calendar-year ranges, base cost. The first and last ranges can "
+        "be partial. CAGR uses 252 trading days per year.",
+        "",
+    ]
+    sp = results["subperiods"]
+    labels = list(sp["Strategy"])
+    rows = []
+    for name, per in sp.items():
+        cells = [
+            BENCHMARK_LABELS.get(name, "Strategy (core sleeve)" if name == "Strategy" else name)
+        ]
+        for label in labels:
+            cells += [_pct(per[label]["cagr"]), _num(per[label]["sharpe"])]
+        rows.append(cells)
+    header = ["Portfolio"]
+    for label in labels:
+        header += [f"{label} CAGR", f"{label} Sharpe"]
+    return [*out, *_table(header, rows)]
+
+
+def _bootstrap_section(results: dict) -> list[str]:
+    out = ["## Uncertainty", ""]
+    b = results.get("bootstrap")
+    if not b:
+        return [*out, "Not computed: the sample is shorter than two bootstrap blocks.", ""]
+    out += [
+        f"Circular block bootstrap of daily excess returns: {b['block_days']} day blocks, "
+        f"{b['draws']} draws, seed {b['seed']}, {b['days']} days. Each draw uses the same "
+        "blocks for the strategy and every benchmark, so differences are paired. Intervals "
+        "are 95% percentile intervals. Share better is the share of draws in which the "
+        "strategy Sharpe is higher than the benchmark's. An interval that contains 0 means "
+        "the difference is not statistically distinguishable from noise.",
+        "",
+    ]
+    s = b["strategy_sharpe"]
+    out += [
+        f"Strategy Sharpe: {_num(s['point'])}, 95% interval {_num(s['lo'])} to {_num(s['hi'])}.",
+        "",
+    ]
+    rows = []
+    for k, v in b["vs"].items():
+        rows.append(
+            [
+                BENCHMARK_LABELS.get(k, k),
+                _num(v["diff_point"]),
+                f"{_num(v['lo'])} to {_num(v['hi'])}",
+                _pct(v["share_better"], 1),
+            ]
+        )
+    out += _table(
+        ["Strategy minus", "Sharpe difference", "95% interval", "Share of draws better"], rows
+    )
+    return out
+
+
 def render_markdown(results: dict, generated_at: str, chart: bool = False) -> str:
     base = results["strategy"]
     bench = results["benchmarks"]
@@ -192,6 +274,10 @@ def render_markdown(results: dict, generated_at: str, chart: bool = False) -> st
     rows = [_metric_row("Strategy (core sleeve)", base)]
     rows += [_metric_row(BENCHMARK_LABELS.get(k, k), v) for k, v in bench.items()]
     out += _table(_METRIC_HEADER, rows)
+
+    out += _weekday_section(results)
+    out += _subperiod_section(results)
+    out += _bootstrap_section(results)
 
     out += ["## Rebalance triggers", ""]
     out += ["Evaluations by trigger and fills actually traded, base config.", ""]

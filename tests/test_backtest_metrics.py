@@ -163,3 +163,68 @@ def test_import_without_yfinance_or_matplotlib(monkeypatch):
     monkeypatch.delitem(sys.modules, "backtest.metrics", raising=False)
     mod = importlib.import_module("backtest.metrics")
     assert hasattr(mod, "summarize")
+
+
+# ---- block bootstrap and subperiods ----
+
+
+def _synthetic(n=600, mean=0.0004, seed=1):
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2015-01-01", periods=n)
+    return pd.Series(rng.normal(mean, 0.01, n), index=idx), pd.Series(0.0, index=idx)
+
+
+def test_bootstrap_is_deterministic_with_the_seed():
+    r, rf = _synthetic()
+    b, _ = _synthetic(seed=2)
+    a1 = metrics.bootstrap_sharpe(r, {"b": b}, rf, draws=200, seed=7)
+    a2 = metrics.bootstrap_sharpe(r, {"b": b}, rf, draws=200, seed=7)
+    a3 = metrics.bootstrap_sharpe(r, {"b": b}, rf, draws=200, seed=8)
+    assert a1 == a2
+    assert a1 != a3
+    assert a1["block_days"] == 63 and a1["draws"] == 200 and a1["seed"] == 7
+
+
+def test_bootstrap_interval_contains_point_estimate_and_is_ordered():
+    r, rf = _synthetic()
+    out = metrics.bootstrap_sharpe(r, {}, rf, draws=300, seed=3)
+    s = out["strategy_sharpe"]
+    assert s["lo"] < s["hi"]
+    assert s["lo"] < s["point"] < s["hi"]
+
+
+def test_bootstrap_identical_series_gives_exactly_zero_difference():
+    r, rf = _synthetic()
+    out = metrics.bootstrap_sharpe(r, {"same": r.copy()}, rf, draws=200, seed=3)
+    d = out["vs"]["same"]
+    assert d["diff_point"] == 0.0
+    assert d["lo"] == 0.0 and d["hi"] == 0.0
+    assert d["share_better"] == 0.0
+
+
+def test_bootstrap_clearly_better_series_has_share_near_one():
+    r, rf = _synthetic(mean=0.0004)
+    better = r + 0.004  # same noise, much higher mean: a paired difference
+    out = metrics.bootstrap_sharpe(better, {"worse": r}, rf, draws=300, seed=3)
+    d = out["vs"]["worse"]
+    assert d["share_better"] > 0.99
+    assert d["lo"] > 0
+
+
+def test_bootstrap_rejects_too_short_series():
+    r, rf = _synthetic(n=40)
+    with pytest.raises(ValueError):
+        metrics.bootstrap_sharpe(r, {}, rf, draws=10, block=63)
+
+
+def test_subperiod_stats_known_answer_and_empty_period():
+    idx = pd.bdate_range("2010-01-04", periods=10)
+    r = pd.Series([0.01] * 10, index=idx)
+    rf = pd.Series(0.0, index=idx)
+    periods = [("2010 to 2010", 2010, 2010), ("2020 to 2021", 2020, 2021)]
+    out = metrics.subperiod_stats(r, rf, periods)
+    assert out["2010 to 2010"]["cagr"] == pytest.approx(1.01**252 - 1)
+    assert out["2010 to 2010"]["days"] == 10
+    assert out["2020 to 2021"] == {"days": 0, "cagr": None, "sharpe": None}

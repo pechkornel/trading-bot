@@ -117,6 +117,56 @@ def test_run_all_raises_when_no_date_qualifies():
         run_synth(data)
 
 
+# ---- sensitivity and uncertainty sections ----
+
+
+def test_weekday_sensitivity_covers_mon_to_fri_and_marks_the_live_day():
+    r = run_synth()
+    w = r["weekday_sensitivity"]
+    assert list(w) == ["0", "1", "2", "3", "4"]
+    assert [w[k]["name"] for k in w] == ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    assert [k for k, v in w.items() if v["live"]] == ["4"]  # small_cfg uses the default Friday
+    for v in w.values():
+        assert set(v) == {"name", "live", "cagr", "volatility", "sharpe", "max_drawdown"}
+    # the live weekday is the base run
+    assert w["4"]["cagr"] == r["strategy"]["cagr"]
+    assert w["4"]["sharpe"] == r["strategy"]["sharpe"]
+
+
+def test_weekday_sensitivity_follows_the_config_weekday():
+    r = brun.run_all(synth_data(), small_cfg(rebalance_day_of_week=1), 0)
+    w = r["weekday_sensitivity"]
+    assert [k for k, v in w.items() if v["live"]] == ["1"]
+    assert w["1"]["cagr"] == r["strategy"]["cagr"]
+
+
+def test_subperiods_have_strategy_and_benchmarks():
+    r = run_synth()
+    sp = r["subperiods"]
+    assert set(sp) == {"Strategy", "spy_buy_hold", "sixty_forty", "equal_weight"}
+    assert list(sp["Strategy"]) == ["2008 to 2012", "2013 to 2019", "2020 to 2024"]
+    assert sp["Strategy"]["2008 to 2012"]["days"] == 0
+    assert sp["spy_buy_hold"]["2020 to 2024"]["days"] > 50
+    assert sp["spy_buy_hold"]["2020 to 2024"]["cagr"] is not None
+
+
+def test_bootstrap_is_none_when_the_sample_is_too_short():
+    assert run_synth()["bootstrap"] is None
+
+
+def test_bootstrap_section_on_a_long_sample_is_deterministic():
+    r1 = brun.run_all(synth_data(n=400), small_cfg(), 0)
+    r2 = brun.run_all(synth_data(n=400), small_cfg(), 0)
+    b = r1["bootstrap"]
+    assert b == r2["bootstrap"]
+    assert (b["block_days"], b["draws"]) == (63, 2000)
+    assert set(b["vs"]) == {"spy_buy_hold", "sixty_forty", "equal_weight"}
+    for v in b["vs"].values():
+        assert v["lo"] <= v["hi"]
+        assert 0.0 <= v["share_better"] <= 1.0
+    assert b["strategy_sharpe"]["lo"] <= b["strategy_sharpe"]["hi"]
+
+
 # ---- results files ----
 
 
@@ -151,6 +201,9 @@ def test_main_writes_outputs(tmp_path):
         "## Data sources",
         "## Assumptions and deviations from live",
         "## Headline results",
+        "## Rebalance weekday sensitivity",
+        "## Subperiods",
+        "## Uncertainty",
         "## Rebalance triggers",
         "## Calendar-year returns",
         "## Ablations",

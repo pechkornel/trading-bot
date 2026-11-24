@@ -13,6 +13,7 @@ Importing this module needs neither yfinance nor matplotlib.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 from backtest import report
-from backtest.ablations import DEFAULT_COST_BPS, VARIANTS, build_cfg
+from backtest.ablations import DEFAULT_COST_BPS, VARIANTS, Variant, build_cfg
 from backtest.data import DataError, MarketData, load_market_data, required_tickers
 from backtest.engine import (
     buy_and_hold,
@@ -32,7 +33,12 @@ from backtest.engine import (
     trading_calendar,
 )
 from backtest.macro_replay import HistoricalMacroFetcher, replay_macro_config
-from backtest.metrics import summarize
+from backtest.metrics import (
+    bootstrap_sharpe,
+    daily_returns,
+    subperiod_stats,
+    summarize,
+)
 from backtest.strategy import CoreReplay, risk_off_days, trigger_counts
 from core.config import (
     CoreSleeveConfig,
@@ -44,6 +50,7 @@ from core.config import (
 
 DEFAULT_CACHE_DIR = "data/cache/backtest"
 DEFAULT_OUT_DIR = "docs/backtest"
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 
 
 def _benchmark_deciders(cfg: CoreSleeveConfig, cal: pd.DatetimeIndex) -> dict[str, Callable]:
@@ -64,6 +71,22 @@ def _check_fred_before(data: MarketData, start: pd.Timestamp, ids: list[str]) ->
         s = data.fred.get(sid)
         if s is None or not (s.dropna().index < start).any():
             raise ValueError(f"{sid}: no FRED observation before the start date {start.date()}")
+
+
+def _weekday_summary(
+    cfg: CoreSleeveConfig,
+    variant: Variant,
+    data: MarketData,
+    macro_cfg: MacroConfig,
+    cooldown: int,
+    adj: pd.DataFrame,
+    cal: pd.DatetimeIndex,
+    rf: pd.Series,
+) -> dict:
+    fetcher = HistoricalMacroFetcher(data.raw_close, data.fred, macro_cfg)
+    replay = CoreReplay(cfg, data.raw_close, fetcher, cooldown)
+    sim = simulate(adj, cal, replay.decide, variant.cost_bps)
+    return summarize(sim.equity, rf, sim.turnover)
 
 
 def run_pipeline(
@@ -119,6 +142,29 @@ def run_pipeline(
         if not v.overrides:
             strategy_by_cost[f"{v.cost_bps:g}"] = summary
 
+    base_variant = next(v for v in VARIANTS if v.name == "base")
+    weekday: dict[str, dict] = {}
+    for dow, name in enumerate(WEEKDAY_NAMES):
+        live = dow == core_cfg.rebalance_day_of_week
+        if live:
+            m = variants["base"]
+        else:
+            m = _weekday_summary(
+                dataclasses.replace(build_cfg(core_cfg, base_variant), rebalance_day_of_week=dow),
+                base_variant,
+                data,
+                macro_cfg,
+                reentry_cooldown_sec,
+                adj,
+                cal,
+                rf,
+            )
+        weekday[str(dow)] = {
+            "name": name,
+            "live": live,
+            **{k: m[k] for k in ("cagr", "volatility", "sharpe", "max_drawdown")},
+        }
+
     benchmarks_by_cost: dict[str, dict] = {}
     for cost in sorted({v.cost_bps for v in VARIANTS}):
         group = {}
@@ -128,6 +174,23 @@ def run_pipeline(
             if cost == DEFAULT_COST_BPS:
                 curves[name] = sim.equity
         benchmarks_by_cost[f"{cost:g}"] = group
+
+    bench_returns = {k: daily_returns(curves[k]) for k in report.BENCHMARK_LABELS}
+    strat_returns = daily_returns(curves["Strategy"])
+    end_year = cal[-1].year
+    periods = [
+        ("2008 to 2012", 2008, 2012),
+        ("2013 to 2019", 2013, 2019),
+        (f"2020 to {end_year}", 2020, end_year),
+    ]
+    subperiods = {
+        "Strategy": subperiod_stats(strat_returns, rf, periods),
+        **{k: subperiod_stats(r, rf, periods) for k, r in bench_returns.items()},
+    }
+    try:
+        bootstrap = bootstrap_sharpe(strat_returns, bench_returns, rf)
+    except ValueError:  # fewer than two blocks of aligned returns
+        bootstrap = None
 
     manifest = data.manifest or {}
     results = {
@@ -145,6 +208,9 @@ def run_pipeline(
         },
         "strategy": variants["base"],
         "benchmarks": benchmarks_by_cost[f"{DEFAULT_COST_BPS:g}"],
+        "weekday_sensitivity": weekday,
+        "subperiods": subperiods,
+        "bootstrap": bootstrap,
         "variants": variants,
         "strategy_by_cost": strategy_by_cost,
         "benchmarks_by_cost": benchmarks_by_cost,
