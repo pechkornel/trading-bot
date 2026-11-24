@@ -91,9 +91,10 @@ macro code (see [ADR 0002](docs/adr/0002-own-backtest-replay.md)). Period 2008-0
 ![Equity and drawdown](docs/backtest/equity_curve.png)
 
 **Over the full period, the core sleeve had a lower CAGR and Sharpe than SPY and 60/40
-for every rebalance weekday.** (It did beat SPY in 2008 to 2012; see the subperiod table.) Against equal weight it is behind with the live Friday rebalance but close or
-ahead on other weekdays, and the Sharpe difference is not statistically significant (see the
-weekday and bootstrap tables in [docs/backtest/results.md](docs/backtest/results.md)). Its
+for every rebalance weekday.** (It did beat SPY in 2008 to 2012; see the subperiod table.) Against equal weight it is behind with a Friday (live) or Monday rebalance, about level on
+Tuesday and Wednesday (slightly ahead on CAGR) and a little behind on Thursday. The Sharpe
+difference for the live Friday rebalance is not statistically significant (see the weekday
+and bootstrap tables in [docs/backtest/results.md](docs/backtest/results.md)). Its
 drawdown was smaller than SPY and 60/40 but not smaller than equal weight. In the ablations, disabling the risk-off switch improved it
 (CAGR 4.86%, Sharpe 0.36, max drawdown -17.66%), and so did dropping the macro score or
 using momentum only. No variant beat 60/40 or SPY. Full tables, calendar-year returns and the
