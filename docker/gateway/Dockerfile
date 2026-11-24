@@ -1,7 +1,9 @@
 # IBKR Client Portal Gateway as a pinned native executable (third-party build).
 # Build context is docker/gateway, so no bot sources are sent to the daemon.
 # The release asset is verified against a pinned SHA-256 before it is unpacked.
-FROM ubuntu:24.04 AS fetch
+# Base image pinned by digest (multi-arch index for ubuntu:24.04, checked 2026-11-24).
+# Refresh: docker buildx imagetools inspect ubuntu:24.04, then update both FROM lines.
+FROM ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b AS fetch
 ARG GATEWAY_VERSION=v1.0.0
 ARG GATEWAY_ASSET=ibkr-gateway-linux-amd64.zip
 ARG GATEWAY_SHA256=01e3b095c9040abcfe16c79af6b667b9c40be52eb0638bc05e6d2aa964e0fe5d
@@ -13,7 +15,7 @@ RUN curl -fsSL -o /tmp/gw.zip \
     && mkdir /out && unzip -q /tmp/gw.zip -d /out \
     && test -f /out/ibkr-gateway && test -f /out/vertx.jks
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 10001 gateway
