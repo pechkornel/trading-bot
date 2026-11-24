@@ -66,7 +66,7 @@ from core.sleeves import (
     SentimentInput,
     SentimentSatelliteSleeve,
 )
-from live.account_equity import format_equity_event, resolve_total_equity
+from live.account_equity import LastReading, format_equity_event, resolve_total_equity
 from live.cpgw_keeper import read_session
 from live.storage import Storage
 
@@ -220,7 +220,10 @@ class PortfolioRunner:
 
         cycle_id = uuid.uuid4().hex[:12]
         # One equity reading per cycle, shared by both sleeves.
-        reading = resolve_total_equity(self.client, self.portfolio_cfg)
+        now = datetime.now(timezone.utc)  # one clock for the whole cycle
+        reading = resolve_total_equity(
+            self.client, self.portfolio_cfg, self._last_gateway_reading(), now
+        )
         equity_note = f"cycle={cycle_id} {format_equity_event(reading)}"
         deliberate = reading.reason.startswith("disabled")
         level = "info" if reading.source == "gateway" or deliberate else "warn"
@@ -229,7 +232,6 @@ class PortfolioRunner:
         if reading.source == "gateway":
             self.storage.log_equity(reading.equity)
         total_equity = reading.equity
-        now = datetime.now(timezone.utc)  # one clock for the whole cycle
         ms = market_state(now)
 
         # Log market state once per cycle so the dashboard timeline shows it
@@ -266,6 +268,17 @@ class PortfolioRunner:
             )
 
     # ---- core sleeve ----
+
+    def _last_gateway_reading(self) -> LastReading | None:
+        """Last accepted gateway reading (the equity table only holds those), or None."""
+        rows = self.storage.equity_history(1)
+        if not rows:
+            return None
+        try:
+            ts = datetime.fromisoformat(rows[0]["ts"])
+            return LastReading(float(rows[0]["equity"]), ts)
+        except (TypeError, ValueError):
+            return None
 
     def _cycle_core(self, cycle_id: str, total_equity: float, ms, now: datetime) -> None:
         assert self.client is not None and self.core is not None

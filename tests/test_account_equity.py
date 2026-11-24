@@ -1,11 +1,14 @@
 """Offline tests for live.account_equity (fake client, no sockets)."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from core.config import PortfolioConfig
 from core.cpgw_client import CPGWError, NotAuthenticatedError
 from live.account_equity import (
     EquityReading,
+    LastReading,
     _mask_account,
     format_equity_event,
     parse_net_liquidation,
@@ -203,3 +206,53 @@ def test_format_fallback():
     assert format_equity_event(r) == (
         "equity: starting_equity 100,000.00 (fallback: no gateway client)"
     )
+
+
+NOW = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+
+
+def last_reading(value=60_000.0, age_sec=3600):
+    return LastReading(value, NOW - timedelta(seconds=age_sec))
+
+
+def test_fresh_last_reading_is_reused_on_gateway_error(cfg):
+    last = last_reading()
+    r = resolve_total_equity(FakeAccountClient(exc=RuntimeError("odd")), cfg, last, NOW)
+    assert r.equity == 60_000.0
+    assert r.source == "last_gateway"
+    assert r.reason == "gateway error: RuntimeError: odd"
+    assert r.as_of == last.ts.isoformat()
+    assert format_equity_event(r) == (
+        f"equity: last net liquidation 60,000.00 "
+        f"(fallback: gateway error: RuntimeError: odd, from {last.ts.isoformat()})"
+    )
+
+
+def test_last_reading_reused_when_client_missing_or_value_bad(cfg):
+    assert resolve_total_equity(None, cfg, last_reading(), NOW).source == "last_gateway"
+    bad = FakeAccountClient(nl(1_000_000.0))
+    assert resolve_total_equity(bad, cfg, last_reading(), NOW).source == "last_gateway"
+
+
+def test_last_reading_older_than_max_age_is_ignored(cfg):
+    old = last_reading(age_sec=cfg.equity_last_max_age_sec + 1)
+    r = resolve_total_equity(FakeAccountClient(exc=RuntimeError("odd")), cfg, old, NOW)
+    assert r.source == "starting_equity"
+    assert r.equity == 100_000.0
+
+
+def test_no_last_reading_uses_starting_equity(cfg):
+    r = resolve_total_equity(FakeAccountClient(exc=RuntimeError("odd")), cfg, None, NOW)
+    assert r.source == "starting_equity"
+
+
+def test_good_gateway_value_wins_over_last_reading(cfg):
+    r = resolve_total_equity(FakeAccountClient(nl(61_000.0)), cfg, last_reading(), NOW)
+    assert r.source == "gateway"
+    assert r.equity == 61_000.0
+
+
+def test_disabled_ignores_last_reading():
+    cfg = PortfolioConfig(use_account_equity=False)
+    r = resolve_total_equity(FakeAccountClient(nl()), cfg, last_reading(), NOW)
+    assert r.source == "starting_equity"

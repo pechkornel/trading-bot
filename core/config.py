@@ -94,6 +94,8 @@ class PortfolioConfig:
     equity_min_ratio: float = 0.25
     equity_max_ratio: float = 4.0
     equity_currency: str = "USD"
+    # A failed read reuses the last accepted gateway reading if it is younger than this.
+    equity_last_max_age_sec: int = 86400
 
     def __post_init__(self) -> None:
         if not self.starting_equity > 0:

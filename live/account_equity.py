@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from core.config import PortfolioConfig
 
@@ -16,9 +17,18 @@ MAX_ERROR_CHARS = 160
 @dataclass(frozen=True)
 class EquityReading:
     equity: float
-    source: str  # "gateway" or "starting_equity"
+    source: str  # "gateway", "last_gateway" or "starting_equity"
     reason: str  # "" for gateway, otherwise why the fallback was used
     currency: str | None = None
+    as_of: str | None = None  # timestamp of the reused reading (source "last_gateway")
+
+
+@dataclass(frozen=True)
+class LastReading:
+    """The last accepted gateway reading from the equity table."""
+
+    equity: float
+    ts: datetime
 
 
 def parse_net_liquidation(summary: object) -> tuple[float, str | None]:
@@ -46,30 +56,49 @@ def _mask_account(text: str, account_id: object) -> str:
     return text.replace(account_id, "***" + account_id[-2:])
 
 
-def _fallback(cfg: PortfolioConfig, reason: str) -> EquityReading:
+def _usable_last(
+    cfg: PortfolioConfig, last: LastReading | None, now: datetime
+) -> LastReading | None:
+    if last is None:
+        return None
+    ts = last.ts if last.ts.tzinfo is not None else last.ts.replace(tzinfo=timezone.utc)
+    age = (now - ts).total_seconds()
+    if 0 <= age <= cfg.equity_last_max_age_sec:
+        return LastReading(last.equity, ts)
+    return None
+
+
+def _fallback(cfg: PortfolioConfig, reason: str, last: LastReading | None = None) -> EquityReading:
+    if last is not None:
+        return EquityReading(last.equity, "last_gateway", reason, None, last.ts.isoformat())
     return EquityReading(cfg.starting_equity, "starting_equity", reason)
 
 
-def _resolve(client: object, cfg: PortfolioConfig) -> EquityReading:
+def _resolve(
+    client: object, cfg: PortfolioConfig, last: LastReading | None, now: datetime
+) -> EquityReading:
     if not cfg.use_account_equity:
         return _fallback(cfg, "disabled (portfolio.use_account_equity: false)")
+    last = _usable_last(cfg, last, now)
     if client is None:
-        return _fallback(cfg, "no gateway client")
+        return _fallback(cfg, "no gateway client", last)
     try:
         summary = client.account_summary()  # type: ignore[attr-defined]
     except Exception as exc:
         message = _mask_account(str(exc), getattr(client, "account_id", None))
-        return _fallback(cfg, f"gateway error: {type(exc).__name__}: {message[:MAX_ERROR_CHARS]}")
+        return _fallback(
+            cfg, f"gateway error: {type(exc).__name__}: {message[:MAX_ERROR_CHARS]}", last
+        )
     try:
         amount, currency = parse_net_liquidation(summary)
     except ValueError as exc:
-        return _fallback(cfg, f"bad summary: {exc}")
+        return _fallback(cfg, f"bad summary: {exc}", last)
     if not math.isfinite(amount):
-        return _fallback(cfg, "net liquidation not finite")
+        return _fallback(cfg, "net liquidation not finite", last)
     if amount <= 0:
-        return _fallback(cfg, f"net liquidation not positive ({amount:,.2f})")
+        return _fallback(cfg, f"net liquidation not positive ({amount:,.2f})", last)
     if currency is not None and currency.upper() != cfg.equity_currency.upper():
-        return _fallback(cfg, f"currency {currency}, expected {cfg.equity_currency}")
+        return _fallback(cfg, f"currency {currency}, expected {cfg.equity_currency}", last)
     low = cfg.equity_min_ratio * cfg.starting_equity
     high = cfg.equity_max_ratio * cfg.starting_equity
     if not low <= amount <= high:
@@ -77,13 +106,21 @@ def _resolve(client: object, cfg: PortfolioConfig) -> EquityReading:
             cfg,
             f"net liquidation {amount:,.2f} outside {low:,.2f} to {high:,.2f} "
             f"({cfg.equity_min_ratio:g}x to {cfg.equity_max_ratio:g}x starting_equity)",
+            last,
         )
     return EquityReading(amount, "gateway", "", currency)
 
 
-def resolve_total_equity(client: object, cfg: PortfolioConfig) -> EquityReading:
+def resolve_total_equity(
+    client: object,
+    cfg: PortfolioConfig,
+    last: LastReading | None = None,
+    now: datetime | None = None,
+) -> EquityReading:
+    """Pure: `last` is the last accepted gateway reading, passed in by the caller."""
+    now = now or datetime.now(timezone.utc)
     try:
-        return _resolve(client, cfg)
+        return _resolve(client, cfg, last, now)
     except Exception as exc:
         reason = f"unexpected error: {type(exc).__name__}"
         return EquityReading(cfg.starting_equity, "starting_equity", reason)
@@ -93,4 +130,9 @@ def format_equity_event(reading: EquityReading) -> str:
     if reading.source == "gateway":
         currency = f" {reading.currency}" if reading.currency else ""
         return f"equity: net liquidation {reading.equity:,.2f}{currency} (gateway)"
+    if reading.source == "last_gateway":
+        return (
+            f"equity: last net liquidation {reading.equity:,.2f} "
+            f"(fallback: {reading.reason}, from {reading.as_of})"
+        )
     return f"equity: starting_equity {reading.equity:,.2f} (fallback: {reading.reason})"

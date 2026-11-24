@@ -393,3 +393,40 @@ def test_cycle_with_gateway_equity_stays_dry_run(tmp_path, monkeypatch):
     with sqlite3.connect(tmp_path / "bot.sqlite") as c:
         live_orders = c.execute("SELECT COUNT(*) FROM orders WHERE dry_run = 0").fetchone()[0]
     assert live_orders == 0
+
+
+def set_equity_row(tmp_path, storage, value, ts):
+    storage.log_equity(value)
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        c.execute("UPDATE equity SET ts = ? WHERE equity = ?", (ts.isoformat(), value))
+
+
+def test_failed_read_reuses_last_gateway_reading_without_drift_rebalance(tmp_path, monkeypatch):
+    tuesday = datetime(2026, 11, 10, 15, tzinfo=timezone.utc)  # not the rebalance day
+    freeze_runner_clock(monkeypatch, tuesday)
+    r = make_runner(tmp_path, ranked_closes())
+    r.satellite = None
+    r.portfolio_cfg = PortfolioConfig(starting_equity=100_000.0, reentry_cooldown_sec=DAY)
+    r.client.exc = RuntimeError("summary down")
+    set_equity_row(tmp_path, r.storage, 60_000.0, tuesday - timedelta(hours=2))
+    seen = {}
+    real_should = r.core.should_evaluate
+
+    def wrapped(**kw):
+        seen["sleeve_equity"] = kw["sleeve_equity"]
+        return real_should(**kw)
+
+    r.core.should_evaluate = wrapped
+    # Balanced at 60,000: two holdings of half the 42,000 sleeve each (prices end at 100).
+    for sym in ("SPY", "TLT"):
+        r.storage.upsert_holding(sleeve="core", symbol=sym, shares=210.0, avg_cost=100.0)
+
+    r._cycle()
+
+    assert seen["sleeve_equity"] == pytest.approx(0.7 * 60_000.0)
+    events = equity_events(r.storage)
+    assert events[0]["level"] == "warn"
+    assert "equity: last net liquidation 60,000.00 (fallback: gateway error" in events[0]["message"]
+    assert equity_rows(tmp_path) == [60_000.0]  # the pre-existing row only, none added
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        assert c.execute("SELECT COUNT(*) FROM rebalances").fetchone()[0] == 0
