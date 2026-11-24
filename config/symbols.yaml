@@ -196,3 +196,21 @@ sentiment_provider:
   poll_interval_sec: 3600
   staleness_sec: 86400                   # 24h — daily-cadence trading
   symbols: [SPY, QQQ, AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL]
+
+# Session keeper (live/cpgw_keeper.py). Times are 24 hour "HH:MM" strings and must be
+# quoted: YAML reads an unquoted 10:30 as a number and the loader rejects it.
+keeper:
+  tickle_interval_sec: 60                # POST /tickle cadence that keeps the gateway session alive
+  timezone: "America/New_York"           # zone for the windows below (handles daylight saving)
+  nightly_gap_start: "00:45"             # IBKR resets /iserver around 01:00: no fresh login inside this window
+  nightly_gap_end: "01:30"
+  maintenance_weekday: 5                 # 0=Mon ... 5=Sat: the weekly maintenance day, no fresh login inside the window
+  maintenance_start: "00:00"             # Saturday maintenance runs all day (start must be before end, no midnight wrap)
+  maintenance_end: "23:59"
+  max_session_age_sec: 86400             # a drop after this age is the expected 24 hour reset
+  login_backoff_base_sec: 60             # unexpected drops retry after 60, 120, 240 ... seconds
+  login_backoff_max_sec: 1800            # ... capped at 30 minutes
+  max_failed_logins: 3                   # submitted login attempts allowed per window before a lockout
+  failed_login_window_sec: 86400         # the lockout window (24 hours)
+  session_lost_alert_cooldown_sec: 3600  # at most one session-lost alert per hour
+  paper_account_prefix: "DU"             # every account id after login must start with this, or the keeper logs out and locks
