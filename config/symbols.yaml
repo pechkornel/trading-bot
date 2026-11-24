@@ -140,7 +140,7 @@ sleeves:
     max_concurrent_positions: 4
     position_pct_of_sleeve: 0.05         # each position is 5% of sleeve equity
     # Exit rules
-    hold_max_days: 10                    # hard exit after N trading days
+    hold_max_days: 10                    # hard exit after N NYSE trading days (session closes after entry)
     stop_loss_pct: 0.05                  # 5% stop
     # Direction
     longs_only: true                     # no shorts

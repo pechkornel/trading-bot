@@ -41,22 +41,25 @@ An older sleeve (`core/sleeves/long_term.py`, `LongTermSleeveConfig`) still exis
 
 `live/portfolio_runner.py` runs one cycle every `portfolio.cycle_interval_sec` (3600 seconds). Each cycle runs the satellite first, then the core sleeve. Most cycles do nothing. The runner reads the clock once per cycle and passes that same time to the market state, the satellite and the core sleeve.
 
-`core/market_hours.py` sorts the current time into a regime, in US Eastern time:
+`core/market_hours.py` sorts the current time into a regime, in US Eastern time. The schedule comes from the NYSE (`XNYS`) calendar of the `exchange_calendars` package. The rules ship in the package, so no network access is needed. US Eastern time is `zoneinfo` `America/New_York`, so DST changes are handled exactly.
 
 | Regime | When |
 |---|---|
-| `OPEN` | Mon to Fri, 09:30 to 16:00 |
-| `PRE_OPEN` | Mon to Fri, 00:00 to 09:30 |
-| `AFTER_CLOSE` | Mon to Fri, 16:00 to 23:59 |
+| `OPEN` | NYSE session day, from the session open to the session close (09:30 to 16:00, or to 13:00 on an early close) |
+| `PRE_OPEN` | NYSE session day, 00:00 to the session open |
+| `AFTER_CLOSE` | NYSE session day, from the session close to 23:59 |
 | `WEEKEND` | Saturday and Sunday |
+| `HOLIDAY` | Monday to Friday with no NYSE session, for the whole Eastern day (no `PRE_OPEN` or `AFTER_CLOSE` on it) |
 
-Eastern time is approximated. The offset is -4 hours from the second Sunday of March up to the first Sunday of November (compared by date only), and -5 hours otherwise. Holidays are not handled.
+Early closes end `OPEN` at the real close, and `AFTER_CLOSE` starts there. `minutes_to_close` uses the real close. `minutes_to_open` is the real elapsed time to the next session open, so it is correct across DST weekends and holidays.
+
+The calendar is built once per process and calendar year, from 2020-01-01 to 31 December of the current UTC year plus 2. A date outside that window raises an error, which the runner logs as `cycle error` and skips the cycle.
 
 What runs in each regime:
 
 - Satellite exits (`should_run_exits`) run in every regime.
 - Satellite entries (`should_run_entries`) run in `OPEN` and `AFTER_CLOSE`.
-- The core sleeve is skipped in `WEEKEND` and `PRE_OPEN`. It is evaluated in `OPEN` and `AFTER_CLOSE`.
+- The core sleeve is skipped in `WEEKEND`, `HOLIDAY` and `PRE_OPEN`. It is evaluated in `OPEN` and `AFTER_CLOSE`.
 
 The runner reads daily bars (`1 day`, `2 Y`) from the Client Portal Gateway for every symbol it needs. Prices are the last close in those bars.
 
@@ -139,7 +142,7 @@ With N held symbols (shares above 0), each symbol's target weight is taken as 1/
 
 ### Calendar trigger
 
-The sleeve evaluates when the Eastern weekday equals `rebalance_day_of_week` (4, Friday). It fires on the first eligible cycle of that day, in `OPEN` or `AFTER_CLOSE` (the runner skips `PRE_OPEN` and `WEEKEND`). It does not wait for the 16:00 close. The reason string is `calendar: Fri`. On other days the reason is `not rebalance day (today=Thu, want=Fri)`.
+The sleeve evaluates when the Eastern weekday equals `rebalance_day_of_week` (4, Friday). It fires on the first eligible cycle of that day, in `OPEN` or `AFTER_CLOSE` (the runner skips `PRE_OPEN`, `WEEKEND` and `HOLIDAY`). It does not wait for the 16:00 close. When that Friday is an NYSE holiday (for example Good Friday), the runner skips the day and the calendar rebalance waits for the next Friday. Drift can still trigger on other days. The reason string is `calendar: Fri`. On other days the reason is `not rebalance day (today=Thu, want=Fri)`.
 
 ### Re-entry cooldown
 
@@ -190,7 +193,7 @@ The runner reads the latest row per symbol from SQLite and never calls the API. 
 
 A position exits when either of these holds:
 
-- Its age is at least `hold_max_days` (10). The code counts calendar days, `(now - opened_at).days`.
+- Its age is at least `hold_max_days` (10). Age is counted in NYSE trading days: the number of sessions whose close is after `opened_at` and at or before now (`trading_days_between`). The entry day counts once its close has passed, also for an intraday entry. An early-close day counts as a full day. Weekends and holidays do not count. The reason text is `hold timer: 10 trading days >= 10 max`.
 - The latest close is at least `stop_loss_pct` (0.05, 5%) below the entry price.
 
 The stop is checked by the bot each cycle. There is no stop order at the broker.
@@ -300,7 +303,7 @@ Defaults from `core/config.py` are `rr_ratio = 4.0` and `atr_multiplier = 2.0`. 
 | Longs only | Satellite entry | Negative scores never open a position. |
 | Max concurrent positions | Satellite entry | At most 4 open at once. |
 | Fixed position size | Satellite entry | 5% of the sleeve per position. |
-| Hold timer | Satellite exit | Exit when the position is 10 or more calendar days old. |
+| Hold timer | Satellite exit | Exit when the position is 10 or more NYSE trading days old. |
 | Bot-side stop | Satellite exit | Exit when the latest close is 5% or more below entry. Checked each cycle, not a broker order. |
 | Limit orders only | Both active sleeves | `LMT` with `DAY` and a 0.05% offset. No market orders. |
 | Missing data | Runner | A symbol with no price is dropped from the cycle. No SPY history stops the core evaluation. |
@@ -311,10 +314,8 @@ Defaults from `core/config.py` are `rr_ratio = 4.0` and `atr_multiplier = 2.0`. 
 
 These are places where the code does not match the intent in the YAML, or where a feature is missing. This file documents the current behaviour.
 
-- **Satellite hold timer counts calendar days.** The YAML comment says trading days. The code uses `(now - opened_at).days`.
 - **The tactical sleeve is not wired into the portfolio runner.** `TacticalSleeve`, `fuse` and `size_portfolio` are not called by any runner. `live/runner.py` uses a fixed quantity and no fusion.
 - **Static starting equity.** Sleeve budgets come from `portfolio.starting_equity`, not from the live account value.
-- **No holiday calendar and approximate daylight saving time.** NYSE holidays and early closes are not known, and the Eastern offset changes by date only.
 
 Smaller code notes:
 
