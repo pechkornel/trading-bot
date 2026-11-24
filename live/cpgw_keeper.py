@@ -41,6 +41,7 @@ from core.auth_types import (
     LoginSetupError,
     ManualStepRequired,
     NotPaperAccount,
+    PaperCheckInconclusive,
 )
 from core.config import (
     LOGS_DIR,
@@ -63,6 +64,8 @@ KEEPER_STATE_FILE = LOGS_DIR / "keeper_state.json"
 GATEWAY_DOWN_ALERT_AFTER_SEC = 300
 LOCKOUT_REMINDER_SEC = 86400
 UNSURE_ALERT_AFTER_TICKS = 5
+PAPER_CHECK_TRIES = 3
+PAPER_CHECK_DELAY_SEC = 2.0
 SOURCE = "cpgw_keeper"
 
 
@@ -185,6 +188,9 @@ class Keeper:
         self._last_wait: tuple[str, datetime | None] | None = None
         self._unsure_ticks = 0
         self._last_unsure_alert: datetime | None = None
+        self._paper_unsure = False
+        self._last_paper_alert: datetime | None = None
+        self._pending_cookie: str | None = None  # from a login whose paper check was unsure
 
     # ---- output helpers (everything passes the Redactor) ----
 
@@ -376,11 +382,38 @@ class Keeper:
         except NotPaperAccount as e:
             self._handle_login_failure(e, now)
             return
+        except PaperCheckInconclusive:
+            self._on_paper_check_unsure()
+            return
+        self._paper_unsure = False
+        self._last_paper_alert = None
         self._session_verified = True
         if self.state.authenticated_since is None:
             self.state.authenticated_since = now
             self._save()
         self._event("info", f"existing session verified (account={account}); no login needed")
+
+    def _on_paper_check_unsure(self) -> None:
+        """No account list after the retries: the session is kept, nothing is locked.
+
+        The check runs again on a later tick. Orders stay fail-closed because the
+        portfolio runner has its own paper lock."""
+        if not self._paper_unsure:
+            self._paper_unsure = True
+            self._event("warn", "paper check inconclusive: no account list; will retry")
+        now = self._clock()
+        cooldown = self.cfg.session_lost_alert_cooldown_sec
+        last = self._last_paper_alert
+        if last is not None and (now - last).total_seconds() < cooldown:
+            return
+        self._last_paper_alert = now
+        self._alert(
+            "warn",
+            "cannot confirm that the session is a paper account (the gateway gave no "
+            "account list). The session was not logged out. The keeper will check again.",
+            key="paper_check_unsure",
+            cooldown_sec=cooldown,
+        )
 
     # ---- window, backoff and lockout handling ----
 
@@ -528,6 +561,14 @@ class Keeper:
 
         try:
             account = self._finish_login(cookie)
+        except PaperCheckInconclusive:
+            # The login worked but paper is unconfirmed. Count it as a login, keep the
+            # session, and let a later tick run the paper check again.
+            policy.record_login_success(self.state, now, self.cfg)
+            self._save()
+            self._pending_cookie = cookie
+            self._on_paper_check_unsure()
+            return
         except IBKRAuthError as e:
             self._handle_login_failure(e, now)
             return
@@ -564,14 +605,32 @@ class Keeper:
         return account
 
     def _paper_guard(self) -> str:
-        """Every account must carry the paper prefix. Fails closed: logs out and raises."""
+        """Every account must carry the paper prefix.
+
+        Warm up the session (`bootstrap` calls /iserver/accounts), then ask for the
+        accounts up to PAPER_CHECK_TRIES times. Only an actual account id without the
+        paper prefix is "not paper": that logs out and raises NotPaperAccount. Errors or
+        empty lists after the retries raise PaperCheckInconclusive, without logging out."""
         prefix = self.cfg.paper_account_prefix
         try:
-            accounts = self.client.list_accounts() or []
-            ids = [str(a.get("id") or a.get("accountId") or "") for a in accounts]
-        except Exception:  # noqa: BLE001
-            ids = []
-        if not ids or not all(i.startswith(prefix) for i in ids):
+            self.client.bootstrap()
+        except Exception:  # noqa: BLE001 - the warm-up is best effort
+            pass
+        ids: list[str] = []
+        for attempt in range(PAPER_CHECK_TRIES):
+            try:
+                accounts = self.client.list_accounts() or []
+                ids = [str(a.get("id") or a.get("accountId") or "") for a in accounts]
+                ids = [i for i in ids if i]
+            except Exception:  # noqa: BLE001
+                ids = []
+            if ids:
+                break
+            if attempt < PAPER_CHECK_TRIES - 1:
+                self._sleep(PAPER_CHECK_DELAY_SEC)
+        if not ids:
+            raise PaperCheckInconclusive("the gateway returned no account list")
+        if not all(i.startswith(prefix) for i in ids):
             try:
                 self.client.logout()
             except Exception:  # noqa: BLE001

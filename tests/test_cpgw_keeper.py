@@ -342,12 +342,14 @@ def test_mixed_accounts_fail_closed(env):
     assert env.state().locked_out_reason
 
 
-def test_empty_account_list_fails_closed(env):
+def test_empty_account_list_does_not_log_out_or_lock_out(env):
+    # Changed on purpose: an empty list used to count as "not paper". It is now
+    # inconclusive (see tests/test_keeper_paper_check.py): alert and retry later.
     env.client.accounts = []
     keeper = env.keeper()
     keeper.tick()
-    assert "logout" in env.client.calls
-    assert env.state().locked_out_reason
+    assert "logout" not in env.client.calls
+    assert env.state().locked_out_reason is None
 
 
 def test_resumed_non_paper_session_is_logged_out(env):

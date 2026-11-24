@@ -42,6 +42,10 @@ class LoginSetupError(IBKRAuthError):
     """The login setup is wrong (CA file, gateway URL, browser). No form was submitted."""
 
 
+class PaperCheckInconclusive(IBKRAuthError):
+    """The gateway gave no account list, so paper or not is unknown. Not a lockout."""
+
+
 class NotPaperAccount(IBKRAuthError):
     """The logged in account is not a paper account."""
 
