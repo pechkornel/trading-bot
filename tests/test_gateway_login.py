@@ -315,3 +315,25 @@ def test_requirements_login_pins_playwright_and_keeps_it_out_of_base():
     assert "-r requirements.txt" in login_reqs
     assert "playwright==" in login_reqs
     assert "playwright" not in (ROOT / "requirements.txt").read_text()
+
+
+def _pinned_playwright() -> str:
+    for line in (ROOT / "requirements-login.txt").read_text().splitlines():
+        if line.startswith("playwright=="):
+            return line.split("==", 1)[1].strip()
+    raise AssertionError("playwright is not pinned with ==")
+
+
+def test_playwright_pin_is_exact_and_not_stale():
+    version = _pinned_playwright()
+    parts = version.split(".")
+    assert all(p.isdigit() for p in parts), version
+    # 1.55.0 was the pin before the sandbox review; require a newer minor.
+    assert (int(parts[0]), int(parts[1])) >= (1, 64)
+
+
+def test_docs_name_the_pinned_playwright_version():
+    version = _pinned_playwright()
+    for rel in ("deploy/README.md", "docs/adr/0003-headless-gateway-login-and-file-secrets.md"):
+        text = (ROOT / rel).read_text()
+        assert f"Playwright {version}" in text or f"playwright=={version}" in text, rel

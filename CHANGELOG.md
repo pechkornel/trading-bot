@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- Headless login to the gateway's own login page with Playwright (`core/gateway_login.py`), wired through the git-ignored `core/ibkr_auth_private.py` (template: `deploy/ibkr_auth_private.py.example`). Headless Chromium only, no X server or Xvfb. Certificate errors are never ignored: the browser accepts only the gateway's own key.
+- Headless login to the gateway's own login page with Playwright (`core/gateway_login.py`), wired through the git-ignored `core/ibkr_auth_private.py` (template: `deploy/ibkr_auth_private.py.example`). Headless Chromium only, no X server or Xvfb. Certificate errors are never ignored: the browser accepts only the gateway's own key. Playwright is pinned to 1.64.1 (released 2026-10-22).
 - Credentials from a chmod 600 secret file or Docker secret (`secrets/ibkr_login`). The keeper refuses a group or world readable file, a file owned by another uid, and a set `IBKR_PASSWORD`.
 - Keeper session policy: a check every 60 s, a new login after the nightly gap, Saturday maintenance and the 24 h reset, backoff capped at 30 minutes, and a persisted lockout after any wrong password, second-factor prompt or unknown page state, or after 3 submitted attempts in 24 h. New flag `python -m live.cpgw_keeper --reset-lockout`.
 - Paper account guard: the keeper logs out and locks itself when an account id does not start with `DU`.

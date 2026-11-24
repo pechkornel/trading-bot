@@ -30,7 +30,7 @@ Four problems stood in the way:
   `deploy/ibkr_auth_private.py.example`) and can override the page selectors and markers.
   The auth error types moved to `core/auth_types.py` to avoid a circular import. CI fails
   when the private file, `secrets/` files or `vendor/` are tracked.
-- **Headless Chromium, TLS kept on.** The keeper image has Playwright 1.55.0 and only
+- **Headless Chromium, TLS kept on.** The keeper image has Playwright 1.64.1 and only
   Chromium's headless shell, so no X server is needed. The gateway gets its own key. The
   browser accepts exactly that key through an SPKI pin computed from the certificate in
   `CPGW_CA_FILE`. HTTPS errors are never ignored. Without the certificate file the login

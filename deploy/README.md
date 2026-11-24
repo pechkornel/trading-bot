@@ -501,9 +501,9 @@ docker compose --profile gateway --profile auto build
 docker image ls | grep tradingbot
 ```
 
-Look for: the keeper image `tradingbot-keeper:local` builds. It installs Playwright 1.55.0 and only Chromium's headless shell (`--only-shell chromium`), with no X server. Expect it to be roughly 300 to 450 MB larger than `tradingbot:local`. Note the real sizes and check the free disk with `df -h /var/lib/docker`.
+Look for: the keeper image `tradingbot-keeper:local` builds. It installs Playwright 1.64.1 and only Chromium's headless shell (`--only-shell chromium`), with no X server. Expect it to be roughly 300 to 450 MB larger than `tradingbot:local`. Note the real sizes and check the free disk with `df -h /var/lib/docker`.
 
-If the build fails while installing Chromium, it is most likely a network problem with Playwright's download. Run it again. The browser download is pinned only through the `playwright==1.55.0` version, not by file hash.
+If the build fails while installing Chromium, it is most likely a network problem with Playwright's download. Run it again. The browser download is pinned only through the `playwright==1.64.1` version, not by file hash.
 
 ### 12. Check the login page without logging in (server)
 
