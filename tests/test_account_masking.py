@@ -71,3 +71,41 @@ def test_keeper_events_stdout_and_alerts_never_carry_the_full_account(env, capsy
 def test_session_file_keeps_the_full_account_for_the_runner(env):
     env.keeper().tick()
     assert ACCOUNT in env.session_file.read_text()
+
+
+def _chain(exc: BaseException) -> list[BaseException]:
+    seen, stack = [], [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or cur in seen:
+            continue
+        seen.append(cur)
+        stack += [cur.__cause__, cur.__context__]
+    return seen
+
+
+def test_transport_error_does_not_chain_the_unmasked_httpx_error():
+    def handler(request):
+        raise httpx.ConnectError(f"cannot reach {request.url} for {ACCOUNT}")
+
+    client = client_answering(handler)
+    client.account_id = ACCOUNT
+    with pytest.raises(CPGWError) as info:
+        client.account_summary()
+    assert ACCOUNT not in str(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None
+    assert _chain(info.value) == [info.value]
+
+
+def test_non_json_error_does_not_chain_the_decode_error_holding_the_body():
+    def handler(request):
+        return httpx.Response(200, text=f"<html>{ACCOUNT}</html>")
+
+    client = client_answering(handler)
+    client.account_id = ACCOUNT
+    with pytest.raises(CPGWError) as info:
+        client.account_summary()
+    assert ACCOUNT not in str(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__context__ is None

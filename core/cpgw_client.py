@@ -201,10 +201,17 @@ class CPGWClient:
         def masked(text: str) -> str:
             return mask_account(text, self.account_id)
 
+        # The errors below are raised after the except block, so neither
+        # __cause__ nor __context__ keeps the unmasked httpx or JSON error
+        # (its text can hold the account id, the URL or the response body).
+        transport_error = ""
+        r = None
         try:
             r = self._client.request(method, path, **kwargs)
         except httpx.HTTPError as e:
-            raise CPGWError(masked(f"HTTP transport error on {method} {path}: {e}")) from e
+            transport_error = f"HTTP transport error on {method} {path}: {e}"
+        if r is None:
+            raise CPGWError(masked(transport_error))
 
         if r.status_code == 401:
             raise NotAuthenticatedError(masked(f"{method} {path} -> 401, session expired"))
@@ -214,8 +221,9 @@ class CPGWClient:
             return None
         try:
             return r.json()
-        except ValueError as e:
-            raise CPGWError(masked(f"{method} {path} returned non-JSON: {r.text[:300]}")) from e
+        except ValueError:
+            pass
+        raise CPGWError(masked(f"{method} {path} returned non-JSON: {r.text[:300]}"))
 
     # ---- session ----
 
