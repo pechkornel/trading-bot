@@ -146,8 +146,20 @@ git status --short                              # must print nothing
 
 ### 5. Gateway (server)
 
+The gateway image is built from a pinned zip that you fetch first (the Dockerfile downloads nothing). It also needs `secrets/gateway_ssl_password` from step 4.
+
 ```bash
 cd ~/trading-bot
+test -s secrets/gateway_ssl_password || echo "missing: create it as in step 4"
+scripts/fetch_gateway.sh
+git status --short                        # must print nothing, vendor/ is git-ignored
+```
+
+Look for a line starting with `OK:`. If it prints `SHA-256 mismatch`, the script deleted the download: stop and do not build. If the build later says the `vendor` context is missing, this fetch did not run.
+
+Then build and start the gateway:
+
+```bash
 docker compose --profile gateway up -d --build ibkr_gateway
 docker compose ps ibkr_gateway            # wait until it shows healthy
 ss -Hltn '( sport = :5000 )'              # expect only 127.0.0.1:5000

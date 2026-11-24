@@ -427,3 +427,27 @@ def test_deploy_readme_never_tells_you_to_put_the_login_in_env():
     # The login lives in secrets/ibkr_login. A sample .env line with it would
     # also trip the keeper's refusal to start while IBKR_PASSWORD is set.
     assert not LOGIN_IN_ENV.search(_read("deploy/README.md"))
+
+
+def _readme_section(heading_re: str) -> str:
+    text = _read("deploy/README.md")
+    match = re.search(heading_re, text, re.M)
+    assert match, heading_re
+    rest = text[match.end() :]
+    nxt = re.search(r"^## ", rest, re.M)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_both_install_paths_fetch_the_gateway_before_the_first_gateway_build():
+    sections = {
+        "0A": _readme_section(r"^## 0A\. Home server \(Docker\)$"),
+        "0B": _phase1_section(),
+    }
+    for name, section in sections.items():
+        fetch = section.find("scripts/fetch_gateway.sh")
+        build = section.find("up -d --build ibkr_gateway")
+        assert fetch != -1, name
+        assert build != -1, name
+        assert fetch < build, name
+        # the password secret must also exist before the first gateway start
+        assert "secrets/gateway_ssl_password" in section[:build], name
