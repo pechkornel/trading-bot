@@ -101,3 +101,12 @@ def test_output_order_matches_input_order():
     signals = [sig("C"), sig("A"), sig("B")]
     out = size_portfolio(signals, 100_000.0, PortfolioParams())
     assert [d.symbol for d in out] == ["C", "A", "B"]
+
+
+def test_gross_cap_accepts_generator_input():
+    # A generator is exhausted after the first pass; the gross-cap branch
+    # iterates the signals a second time and must not lose decisions.
+    out = size_portfolio((sig(s) for s in "ABC"), 100_000.0, PortfolioParams(max_gross_pct=0.5))
+    assert [d.symbol for d in out] == ["A", "B", "C"]
+    assert all("gross-capped" in d.reason for d in out)
+    assert sum(d.position_value for d in out) <= 50_000

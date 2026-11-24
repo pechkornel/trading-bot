@@ -154,6 +154,8 @@ def size_portfolio(
     Size a portfolio in one shot.
     Returns one SizingDecision per input signal (same order).
     """
+    # Materialise once: the gross-cap branch iterates the signals a second time.
+    signals = list(signals)
     decisions = [_size_one(s, equity, params) for s in signals]
 
     gross = sum(d.position_value for d in decisions)
