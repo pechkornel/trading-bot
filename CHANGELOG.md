@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The Docker guide in `deploy/README.md` requires Docker Engine 28 or later.
 - `DASHBOARD_HOST` defaults to `127.0.0.1`, so the dashboard is no longer reachable on the tailnet IP directly.
   **Upgrade note:** run `sudo tailscale serve --bg 8765` and open the `https://<machine>.<tailnet>.ts.net` URL instead.
 - The core calendar trigger reason is now `calendar: Fri` instead of `calendar: Fri close`, because it fires on the first Friday cycle in Eastern time, not at the close (#5). Anything that matches the old string in `targets.reason` or the events log must be updated.

@@ -52,13 +52,14 @@ Notes before you start:
 ```bash
 uname -m                                  # expect x86_64
 grep -c -w avx2 /proc/cpuinfo             # expect a number above 0
-docker version --format '{{.Server.Version}}'   # expect 28 or newer
+docker version --format '{{.Server.Version}}'   # must be 28 or newer
 systemctl is-enabled docker               # expect enabled
 tailscale status
 id -u                                     # expect 1000
-ss -ltn '( sport = :5000 )'               # expect no output
+ss -Hltn '( sport = :5000 )'              # expect no output
 ```
 
+- Docker Engine 28 or later is required. Older engines let other hosts on the same LAN reach ports published on `127.0.0.1`. If the version is older, upgrade Docker from Docker's apt repo before you continue. Do not start the gateway until the check prints 28 or higher.
 - If `avx2` prints `0`, stop. The pinned gateway binary needs AVX2. Use the Java gateway from `UBUNTU_SETUP.md` section 3 instead.
 - If something listens on port 5000 (for example the Java `cpgw` service), stop it first: `sudo systemctl disable --now cpgw`.
 - If `id -u` is not 1000, the `logs/` folder needs `chown` to your uid (see Troubleshooting).
@@ -125,26 +126,35 @@ git status --short                              # must print nothing
 cd ~/trading-bot
 docker compose --profile gateway up -d --build ibkr_gateway
 docker compose ps ibkr_gateway            # wait until it shows healthy
-ss -ltn '( sport = :5000 )'               # expect only 127.0.0.1:5000
-curl -sk https://127.0.0.1:5000/ | head -c 300
+ss -Hltn '( sport = :5000 )'              # expect only 127.0.0.1:5000
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:5000/
 ```
 
-- The `curl` should print the gateway login page HTML.
-- If it prints "Access Denied", the gateway ignored the mounted `docker/gateway/conf.yaml` (this behaviour of the pinned build is not verified yet). Run `docker compose --profile gateway down` and stop. Nothing is exposed. Report it before going on.
-- From another tailnet machine, port 5000 must not be reachable. Laptop:
+- Any HTTP code (for example 200 or 302) means the gateway answers. Then check the body: `curl -sk https://127.0.0.1:5000/ | head -c 300`.
+- If the body text is "Access Denied", the gateway ignored the mounted `docker/gateway/conf.yaml` (this behaviour of the pinned build is not verified yet). The status code alone does not show this, so read the body. Run `docker compose --profile gateway down` and stop. Nothing is exposed. Report it before going on.
+- `000` or "Failed to connect" means nothing answers on 127.0.0.1:5000. Check `docker compose ps ibkr_gateway` and the logs.
+- Mandatory check from a second machine. Laptop, on the same LAN or tailnet:
 
 ```bash
 curl -sk --max-time 5 https://<server-lan-ip>:5000/
+curl -sk --max-time 5 https://<server-tailnet-ip>:5000/
 ```
 
-This must fail to connect. Do the same with the server's Tailscale IP.
+Both must fail to connect. If either one connects, run `docker compose --profile gateway down` on the server and stop. Do not go on until you know why.
 
 ### 6. Dashboard (server)
 
 ```bash
 docker compose up -d --build dashboard
 curl -fsS http://127.0.0.1:8765/api/health   # expect "paper":true, "dry_run":true, "ib_port":5000
-ss -ltn '( sport = :8765 )'                  # expect only 127.0.0.1:8765
+ss -Hltn '( sport = :8765 )'                 # expect only 127.0.0.1:8765
+```
+
+Check from the laptop. Both must fail to connect. If either one connects, run `docker compose --profile gateway down` and `docker compose down` on the server and stop.
+
+```bash
+curl -sS --max-time 5 http://<server-lan-ip>:8765/api/health
+curl -sS --max-time 5 http://<server-tailnet-ip>:8765/api/health
 ```
 
 ### 7. Tailnet access (server)
@@ -195,9 +205,54 @@ For nightly backups, add this line with `crontab -e`:
 15 3 * * * $HOME/trading-bot/deploy/backup.sh
 ```
 
+### 10. Reboot check (server)
+
+The services use `restart: unless-stopped` and Docker is enabled, so everything should come back after a reboot.
+
+```bash
+sudo reboot
+```
+
+After you reconnect over SSH:
+
+```bash
+cd ~/trading-bot
+docker compose --profile gateway --profile auto ps   # all services up, gateway and dashboard healthy
+tailscale serve status                               # still proxies to http://127.0.0.1:8765
+```
+
+If a service is missing, run `docker compose --profile gateway --profile auto up -d` and look at its logs.
+
+### Rollback (server)
+
+Stop the Docker gateway and the bot containers:
+
+```bash
+cd ~/trading-bot
+docker compose --profile gateway --profile auto down
+```
+
+Go back to the host Java gateway. Step 1 may have disabled the `cpgw` service. Re-enable it only after the Docker gateway is down, because both want port 5000:
+
+```bash
+ss -Hltn '( sport = :5000 )'              # expect no output
+sudo systemctl enable --now cpgw
+```
+
+Return to the previous commit and rebuild:
+
+```bash
+git log --oneline -5
+git checkout <previous-commit>
+docker compose --profile auto up -d --build
+```
+
+Run `git checkout main` later to leave the detached state.
+
 ### Troubleshooting
 
 - "Access Denied" from the gateway: see step 5.
+- The gateway restarts in a loop: run `docker compose logs ibkr_gateway`. One likely cause is that the unverified `--conf ../root/conf.yaml` path is wrong for the pinned build. Report the last log lines, run `docker compose --profile gateway down`, and fall back to the Java gateway (see Rollback).
 - The gateway exits with code 132 or "Illegal instruction": the CPU lacks AVX2. Use the Java gateway.
 - `Pool overlaps` when compose creates the network: another Docker network uses 172.31.250.0/24. Change the subnet in `docker-compose.yml` and the allow pattern in `docker/gateway/conf.yaml` together. The tests check that they match.
 - Permission errors in `logs/`: `sudo chown 1000:1000 logs`.
@@ -332,6 +387,8 @@ journalctl -u tradingbot-dashboard@user -f
 ```
 
 (`@user` is the instance name - pass your username there. `%i` in the unit gets substituted with it.)
+
+Warning: with the systemd units (not Docker), never leave `DASHBOARD_HOST=` empty in `.env`. systemd then passes an empty host and uvicorn listens on all interfaces, and the dashboard has no authentication. Set it to `127.0.0.1` or remove the line.
 
 ### Going live
 Edit `/etc/systemd/system/tradingbot-portfolio@.service`, change `ExecStart` to add `--live`, then:
