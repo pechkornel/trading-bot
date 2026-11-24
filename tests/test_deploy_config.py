@@ -1,5 +1,6 @@
 """Offline checks of the deploy files. They pin the safety properties."""
 
+from fnmatch import fnmatch
 from pathlib import Path
 
 import yaml
@@ -140,3 +141,33 @@ def test_gateway_dockerfile_pins_release_and_hash():
     assert GATEWAY_SHA256 in text
     assert "sha256sum -c" in text
     assert any(line.startswith("USER ") for line in text.splitlines())
+
+
+def _ignore_lines(rel: str) -> list[str]:
+    lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+
+def test_gitignore_covers_the_gateway_session_file():
+    # logs/cpgw_session.json holds the gateway session cookie.
+    assert "logs/*.json" in _ignore_lines(".gitignore")
+    assert fnmatch("logs/cpgw_session.json", "logs/*.json")
+
+
+def test_dockerignore_excludes_secrets_and_bind_mounted_models():
+    lines = _ignore_lines(".dockerignore")
+    for expected in (
+        ".env",
+        "logs/",
+        "models/artifacts/*/model.pkl",
+        "models/artifacts/*/model.keras",
+        "models/artifacts/*/scaler.gz",
+    ):
+        assert expected in lines, expected
+
+
+def test_dockerignore_keeps_the_private_auth_module():
+    # Decision D4: the private login module must be copied into the image.
+    lines = _ignore_lines(".dockerignore")
+    assert not any("ibkr_auth_private" in line or line == "core/" for line in lines)
+    assert not any(fnmatch("core/ibkr_auth_private.py", line) for line in lines)
