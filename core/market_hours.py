@@ -23,7 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
+
+import exchange_calendars as xcals
 
 # US Eastern is UTC-5 (EST) or UTC-4 (EDT). Python's stdlib doesn't ship full
 # tz data on all platforms; we approximate by detecting DST manually. For our
@@ -59,6 +62,22 @@ def to_eastern(utc: datetime) -> datetime:
         utc = utc.replace(tzinfo=timezone.utc)
     et = utc.astimezone(timezone.utc) + _us_eastern_offset(utc)
     return et.replace(tzinfo=None)
+
+
+# ---- NYSE calendar ----
+
+
+@lru_cache(maxsize=2)
+def _nyse(end_year: int) -> xcals.ExchangeCalendar:
+    return xcals.get_calendar("XNYS", start="2020-01-01", end=f"{end_year}-12-31")
+
+
+def nyse_calendar() -> xcals.ExchangeCalendar:
+    """XNYS calendar from 2020 to 31 December of the current year + 2.
+
+    Built once per process and calendar year, so a long-running process
+    rebuilds it after New Year."""
+    return _nyse(datetime.now(timezone.utc).year + 2)
 
 
 # ---- regime detection ----
