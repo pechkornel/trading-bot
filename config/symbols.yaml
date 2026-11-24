@@ -98,13 +98,18 @@ universe:
     timeframe_label: "daily"
 
 portfolio:
-  starting_equity: 100000.0              # fallback total equity when the paper account value is unavailable or rejected,
-                                         # and the anchor of the range check below
+  starting_equity: 100000.0              # last-resort total equity when the paper account value is unavailable or rejected
+                                         # and there is no recent gateway reading, and the anchor of the range check below
   use_account_equity: true               # size sleeves from the paper account's net liquidation; false = always starting_equity
+                                         # (must be a YAML boolean: a quoted "false" is rejected at load)
   equity_min_ratio: 0.25                 # reject a net liquidation below this multiple of starting_equity
-  equity_max_ratio: 4.0                  # reject a net liquidation above this multiple of starting_equity
+  equity_max_ratio: 2.0                  # reject a net liquidation above this multiple of starting_equity
                                          # (a 1,000,000 paper account needs starting_equity: 1000000)
-  equity_currency: "USD"                 # expected currency of the account value (a missing currency is accepted)
+  equity_max_step: 0.25                  # reject a reading that differs by more than this fraction (25%) from the last
+                                         # accepted gateway reading (only checked while that reading is younger than the max age)
+  equity_last_max_age_sec: 86400         # after a failed or rejected read, reuse the last accepted gateway reading if it is
+                                         # younger than this (one day); otherwise fall back to starting_equity
+  equity_currency: "USD"                 # expected 3 letter currency of the account value (a missing currency is accepted)
   cycle_interval_sec: 3600               # one decision cycle per hour
                                          # (core acts at most once per US Eastern day:
                                          #  on Friday or on drift;
