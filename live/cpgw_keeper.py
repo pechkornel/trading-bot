@@ -100,6 +100,11 @@ def _default_client(cookie: str, port: int) -> CPGWClient:
     return CPGWClient(cookie=cookie, port=port)
 
 
+def _default_probe(port: int) -> CPGWClient:
+    """A client with no cookie, so its answer does not depend on the stored session file."""
+    return CPGWClient(cookie="", port=port)
+
+
 class Keeper:
     """Long-running auth/tickle loop driven by `keeper_policy.decide`."""
 
@@ -110,6 +115,7 @@ class Keeper:
         keeper_cfg: KeeperConfig | None = None,
         login_fn: Callable[..., str] | None = None,
         client_factory: Callable[[str, int], Any] | None = None,
+        probe_factory: Callable[[int], Any] | None = None,
         notifier: Any = None,
         storage: Any = None,
         clock: Callable[[], datetime] | None = None,
@@ -138,6 +144,7 @@ class Keeper:
 
         self._login = login_fn or login
         self._client_factory = client_factory or _default_client
+        self._probe_factory = probe_factory or _default_probe
         self._clock = clock or _default_clock
         self._sleep = sleep or time.sleep
         self._install_signals = install_signals
@@ -257,15 +264,37 @@ class Keeper:
             return Observation.GATEWAY_DOWN
 
     def _gateway_state_before_login(self) -> str:
-        """Re-check right before a login: 'authenticated', 'down' or 'ok'."""
+        """Re-check right before a login: 'authenticated', 'down', 'unsure' or 'ok'.
+
+        The first check uses the stored cookie. A lost or stale session file would make it
+        say "not authenticated" while the gateway holds a live session for another cookie,
+        so a second check runs with no cookie. Only an explicit "authenticated: false"
+        from that second check allows a login; anything else means do not submit."""
         try:
             if (self.client.auth_status() or {}).get("authenticated"):
                 return "authenticated"
         except NotAuthenticatedError:
-            return "ok"
+            pass
         except Exception:  # noqa: BLE001
             return "down"
-        return "ok"
+        return self._cookieless_state()
+
+    def _cookieless_state(self) -> str:
+        probe = None
+        try:
+            probe = self._probe_factory(self.cpgw_port)
+            answer = probe.auth_status()
+        except Exception:  # noqa: BLE001 - any error, including a 401, is inconclusive
+            return "unsure"
+        finally:
+            if probe is not None:
+                try:
+                    probe.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        if not isinstance(answer, dict) or not isinstance(answer.get("authenticated"), bool):
+            return "unsure"
+        return "authenticated" if answer["authenticated"] else "ok"
 
     # ---- one tick ----
 
@@ -379,6 +408,13 @@ class Keeper:
             return
         if gateway == "down":
             self._event("warn", "gateway not reachable right before login; skipping login")
+            return
+        if gateway == "unsure":
+            self._event(
+                "warn",
+                "the cookie-less gateway check gave no clear answer right before login; "
+                "skipping login (waiting)",
+            )
             return
         cooldown = self.cfg.session_lost_alert_cooldown_sec
         if action.expected:

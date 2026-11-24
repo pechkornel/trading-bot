@@ -95,6 +95,19 @@ class FakeClient:
         pass
 
 
+class FakeCookielessProbe:
+    """Cookie-less check that mirrors the fake gateway unless a test replaces the answer."""
+
+    def __init__(self, client: FakeClient) -> None:
+        self.client = client
+
+    def auth_status(self):
+        return {"authenticated": self.client.authenticated}
+
+    def close(self):
+        pass
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, str]] = []
@@ -146,6 +159,7 @@ class Env:
             keeper_cfg=cfg or KeeperConfig(),
             login_fn=self.login,
             client_factory=lambda cookie, port: self.client,
+            probe_factory=lambda port: FakeCookielessProbe(self.client),
             notifier=self.notifier,
             storage=self.storage,
             clock=self.clock,
