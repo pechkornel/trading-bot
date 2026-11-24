@@ -156,9 +156,9 @@ def should_run_entries(state: MarketState) -> bool:
 
 
 def should_run_exits(state: MarketState) -> bool:
-    """Should we check exit conditions (10-day timer, stops)?
+    """Should we check exit conditions (trading-day hold timer, stops)?
 
-    Yes always — the 10-day timer doesn't care about hours, and time-based
+    Yes always: the hold timer counts NYSE trading days, not hours, and time-based
     exit ORDERS can be queued for the next open. Stops only meaningfully fire
     during market hours, but checking the flag at any time is cheap."""
     return True

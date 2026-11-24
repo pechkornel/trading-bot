@@ -9,7 +9,7 @@ This is the smaller, more reactive sleeve (20% of equity by default).
 
 Decision flow per cycle (only runs when market state permits):
 
-  EXITS first — any open position held for >= hold_max_days NYSE trading days
+  EXITS first: any open position held for >= hold_max_days NYSE trading days
                 OR whose current price is < entry × (1 - stop_loss_pct)
                 gets closed (or queued for next open if market is closed).
 
