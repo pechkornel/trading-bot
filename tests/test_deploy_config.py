@@ -247,3 +247,112 @@ def test_gateway_dockerfile_pins_every_base_image_by_digest():
     assert len(froms) == 2
     for line in froms:
         assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64}( AS \w+)?$", line), line
+
+
+MEM_LIMITS = {
+    "ibkr_gateway": "768m",
+    "cpgw_keeper": "640m",
+    "portfolio": "640m",
+    "dashboard": "512m",
+    "sentiment": "256m",
+}
+CA_PATH = "/app/gateway_tls/cert.pem"
+TLS_MOUNT = "ibkr_gateway_tls:/app/gateway_tls:ro"
+
+
+def _mb(value: str) -> int:
+    assert value.endswith("m"), value
+    return int(value[:-1])
+
+
+def test_every_service_has_the_planned_memory_limit_and_no_swap():
+    services = _compose()["services"]
+    assert set(services) == set(MEM_LIMITS)
+    for name, limit in MEM_LIMITS.items():
+        assert services[name]["mem_limit"] == limit, name
+        assert services[name]["memswap_limit"] == limit, name
+
+
+def test_memory_total_of_auto_profile_plus_gateway_fits_the_budget():
+    services = _compose()["services"]
+    names = ["dashboard"] + [
+        n for n, s in services.items() if "auto" in s.get("profiles", []) or n == "ibkr_gateway"
+    ]
+    assert sum(_mb(services[n]["mem_limit"]) for n in names) <= 2560
+
+
+def test_sentiment_moved_to_the_research_profile():
+    assert _compose()["services"]["sentiment"]["profiles"] == ["research"]
+
+
+def test_only_the_keeper_has_the_login_secret_and_keeper_target():
+    compose = _compose()
+    assert compose["secrets"]["ibkr_login"]["file"] == "./secrets/ibkr_login"
+    for name, service in compose["services"].items():
+        has_secret = "ibkr_login" in service.get("secrets", [])
+        assert has_secret == (name == "cpgw_keeper"), name
+        target = service.get("build", {}).get("target")
+        if name == "cpgw_keeper":
+            assert target == "keeper"
+            assert service["image"] == "tradingbot-keeper:local"
+        elif name != "ibkr_gateway":
+            assert target == "app", name
+
+
+def test_keeper_runs_as_uid_1000_to_own_the_secret_file():
+    # core/secret_store.py wants mode 600 and the reading uid as owner. A compose
+    # file secret keeps the host owner, so the container uid must match it.
+    assert str(_compose()["services"]["cpgw_keeper"]["user"]) == "1000:1000"
+    assert re.search(r"useradd[^\n]*--uid 1000 bot", _read("docker/Dockerfile"))
+    assert "uid 1000" in _read("docker-compose.yml")
+
+
+def test_gateway_certificate_reaches_keeper_and_portfolio_read_only():
+    services = _compose()["services"]
+    for name in ("cpgw_keeper", "portfolio"):
+        assert TLS_MOUNT in services[name]["volumes"], name
+        assert f"CPGW_CA_FILE={CA_PATH}" in services[name]["environment"], name
+    assert not any("gateway_tls" in v for v in services["dashboard"]["volumes"])
+
+
+def _dockerfile_stages() -> list[str]:
+    return re.findall(r"^FROM .+ AS (\w+)$", _read("docker/Dockerfile"), flags=re.MULTILINE)
+
+
+def test_dockerfile_has_three_named_stages_with_app_last():
+    assert _dockerfile_stages() == ["deps", "keeper", "app"]
+
+
+def test_keeper_stage_installs_headless_shell_only():
+    text = _read("docker/Dockerfile")
+    keeper = text.split(" AS keeper", 1)[1].split(" AS app", 1)[0]
+    assert "requirements-login.txt" in keeper
+    assert "--only-shell chromium" in keeper
+    assert "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright" in keeper
+    assert "playwright" not in text.split(" AS app", 1)[1].lower()
+
+
+def test_no_deploy_file_mentions_live_wildcard_password_or_xvfb():
+    for rel in ("docker-compose.yml", "docker/Dockerfile"):
+        text = _read(rel).lower()
+        for banned in ("--live", "0.0.0.0", "ibkr_password", "xvfb"):
+            assert banned not in text, (rel, banned)
+
+
+def test_deploy_files_have_no_em_or_en_dashes():
+    for rel in ("docker-compose.yml", "docker/Dockerfile", ".env.example"):
+        text = _read(rel)
+        assert "—" not in text and "–" not in text, rel
+
+
+def test_env_example_has_no_password_and_lists_the_new_variables():
+    text = _read(".env.example")
+    assert "IBKR_PASSWORD" not in text and "IBKR_USERNAME" not in text
+    lines = text.splitlines()
+    for expected in (
+        "TELEGRAM_BOT_TOKEN=",
+        "TELEGRAM_CHAT_ID=",
+        "IBKR_LOGIN_SECRET_FILE=",
+        "CPGW_CA_FILE=",
+    ):
+        assert expected in lines
