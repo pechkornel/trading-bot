@@ -26,6 +26,13 @@
 #   PAPER=true                     - assert_paper_mode refuses anything else
 #   IB_PORT=5000                   - CPGW only ever uses 5000
 #
+# Gateway certificate: CPGW_CA_FILE is NOT set in this file. Every bot service
+# already reads .env (env_file), so the path lives there and is empty by default.
+# Set CPGW_CA_FILE=/app/gateway_tls/cert.pem in .env only when you run the
+# ibkr_gateway service. With the host Java gateway, point it at the certificate
+# you exported (see deploy/README.md) or leave it empty for the portfolio runner.
+# A fixed path here would crash-loop the keeper and the runner without cert.pem.
+#
 # The IBKR login is NOT in .env. It is the file ./secrets/ibkr_login (mode 600),
 # mounted as a Compose secret into cpgw_keeper only.
 #
@@ -99,8 +106,6 @@ services:
       - ./config:/app/config:ro
       - ./.env:/app/.env:ro
       - ibkr_gateway_tls:/app/gateway_tls:ro
-    environment:
-      - CPGW_CA_FILE=/app/gateway_tls/cert.pem
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     depends_on:
@@ -125,8 +130,6 @@ services:
       - ./config:/app/config:ro
       - ./.env:/app/.env:ro
       - ibkr_gateway_tls:/app/gateway_tls:ro
-    environment:
-      - CPGW_CA_FILE=/app/gateway_tls/cert.pem
     depends_on:
       dashboard:
         condition: service_healthy

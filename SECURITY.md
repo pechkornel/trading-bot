@@ -106,8 +106,8 @@
   the server. If it ignores them, requests are denied, so nothing is exposed. "Access Denied"
   from `curl -sk https://127.0.0.1:5000/` means exactly that. CORS stays IBKR's default
   (`origin.allowed: "*"`).
-- **Gateway certificate checks.** When `CPGW_CA_FILE` is set (compose sets it for the keeper
-  and the portfolio runner), `CPGWClient` verifies the gateway certificate against that file
+- **Gateway certificate checks.** When `CPGW_CA_FILE` is set (set in `.env` for the
+  Docker gateway, never hard-coded in compose), `CPGWClient` verifies the gateway certificate against that file
   with host name checking. A set but missing file is an error. If unset (host Java gateway),
   verification stays off for the loopback address.
 - **CPU requirement.** The `v1.0.0` binary may need a CPU with AVX2. On an older CPU it exits

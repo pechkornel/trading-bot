@@ -311,8 +311,31 @@ def test_gateway_certificate_reaches_keeper_and_portfolio_read_only():
     services = _compose()["services"]
     for name in ("cpgw_keeper", "portfolio"):
         assert TLS_MOUNT in services[name]["volumes"], name
-        assert f"CPGW_CA_FILE={CA_PATH}" in services[name]["environment"], name
     assert not any("gateway_tls" in v for v in services["dashboard"]["volumes"])
+
+
+def test_compose_does_not_force_a_ca_file_on_every_gateway():
+    # A hard-coded CPGW_CA_FILE crash-loops the keeper and the portfolio runner
+    # with the host Java gateway, which writes no /app/gateway_tls/cert.pem.
+    # The path comes from .env (env_file), set only for the native gateway.
+    compose = _compose()
+    for name, service in compose["services"].items():
+        env = service.get("environment", [])
+        assert not any("CPGW_CA_FILE" in str(item) for item in env), name
+    assert ".env" in compose["x-bot-common"]["env_file"]
+
+
+def test_env_example_leaves_the_ca_file_empty_and_documents_the_native_path():
+    text = _read(".env.example")
+    assert "CPGW_CA_FILE=" in text.splitlines()
+    assert CA_PATH in text
+
+
+def test_readme_documents_exporting_the_java_gateway_certificate():
+    text = _read("deploy/README.md")
+    assert "openssl s_client -connect 127.0.0.1:5000" in text
+    assert "subjectAltName" in text or "Subject Alternative Name" in text
+    assert f"CPGW_CA_FILE={CA_PATH}" in text
 
 
 def _dockerfile_stages() -> list[str]:

@@ -29,6 +29,24 @@ Pick one. Both end with a dashboard you reach via Tailscale.
   section 0B. The login code itself is not part of the repo: you wire it in with
   `core/ibkr_auth_private.py`, copied from `deploy/ibkr_auth_private.py.example`.
 
+### Java gateway: export its certificate once
+
+Skip this when you use the Docker gateway (`--profile gateway`): it writes its own certificate and you set `CPGW_CA_FILE=/app/gateway_tls/cert.pem` in `.env` (sections 0A and 0B). `docker-compose.yml` does not set `CPGW_CA_FILE` itself, so the keeper and the portfolio runner start with the host Java gateway too.
+
+The keeper's login pins the gateway certificate in the browser and refuses to run without a CA file. With the host Java gateway, export its certificate once. Server, with the gateway running:
+
+```bash
+openssl s_client -connect 127.0.0.1:5000 -servername localhost </dev/null 2>/dev/null | openssl x509 -outform PEM > config/gateway_cert.pem
+chmod 644 config/gateway_cert.pem
+openssl x509 -in config/gateway_cert.pem -noout -subject -enddate
+openssl x509 -in config/gateway_cert.pem -noout -ext subjectAltName
+```
+
+- The last command must list `DNS:localhost` and `IP Address:127.0.0.1`. IBKR's default Java gateway certificate may not cover them. If the list is empty or lacks both names, the pinned check can fail on the host name. Then either generate your own certificate for the Java gateway (as `docker/gateway/entrypoint.sh` does, with `subjectAltName=DNS:localhost,IP:127.0.0.1`) or use the Docker gateway.
+- `*.pem` files are ignored by version control. This one is a public certificate, not a key, but still never commit it.
+- Docker: `./config` is mounted read-only at `/app/config`, so set `CPGW_CA_FILE=/app/config/gateway_cert.pem` in `.env`. systemd: set `CPGW_CA_FILE=/opt/trading-bot/config/gateway_cert.pem` in `.env`.
+- Export it again after the Java gateway regenerates its certificate.
+
 > If you used Phase 5 with `ibapi` + IB Gateway (Java desktop with GUI login):
 > the new flow replaces that entirely. You no longer need to log in via VNC daily.
 > The Java CPGW process replaces the IB Gateway process, and `cpgw_keeper`
@@ -92,9 +110,11 @@ IB_PORT=5000
 DASHBOARD_HOST=127.0.0.1
 IBKR_USERNAME=<your paper username>
 IBKR_PASSWORD=<your paper password>
+CPGW_CA_FILE=/app/gateway_tls/cert.pem
 SENTIMENT_PROVIDER=stub
 ```
 
+- `CPGW_CA_FILE` is correct for the Docker gateway used in this section. With the host Java gateway, see "Java gateway: export its certificate once" in section 0.
 - Do not put `IBKR_USERNAME` or `IBKR_PASSWORD` in `.env`. The keeper refuses to start while `IBKR_PASSWORD` is set. The login goes in `secrets/ibkr_login` (step 4).
 - `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`. The sentiment sleeve is off either way (allocation 0%).
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts (create the bot with BotFather on your phone). Fill the `EMAIL_*` values only if you use the single-symbol runner, which still sends Gmail.
@@ -391,7 +411,7 @@ nano .env
 - Delete the `IBKR_USERNAME` and `IBKR_PASSWORD` lines. The keeper refuses to start while `IBKR_PASSWORD` is set.
 - Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (create the bot with BotFather on your phone and send it one message first).
 - Leave `PAPER=true`, `DRY_RUN=true`, `IB_PORT=5000` and `DASHBOARD_HOST=127.0.0.1` as they are.
-- Leave `IBKR_LOGIN_SECRET_FILE` and `CPGW_CA_FILE` empty in Docker: compose sets the certificate path for the keeper and the portfolio runner.
+- Leave `IBKR_LOGIN_SECRET_FILE` empty in Docker. Set `CPGW_CA_FILE=/app/gateway_tls/cert.pem` when you run the `ibkr_gateway` service (compose does not set it for you). With the host Java gateway, point it at the exported certificate instead (see section 0).
 
 `.env` is loaded into every container, so the Telegram token is visible to all of them. It is not a broker secret, but keep `.env` mode 600.
 
