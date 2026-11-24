@@ -37,6 +37,13 @@ jobs:
             echo "$tracked"
             exit 1
           fi
+          secrets_tracked="$(git ls-files -- '.env' '.env.*' '*.key' \
+            | grep -Fxv '.env.example' || true)"
+          if [ -n "$secrets_tracked" ]; then
+            echo "Env files or private keys are tracked by git:"
+            echo "$secrets_tracked"
+            exit 1
+          fi
       - name: Check formatting
         run: .venv/bin/ruff format --check .
       - name: Lint

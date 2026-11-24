@@ -79,3 +79,46 @@ def test_ci_checks_for_tracked_private_files():
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "Private files are not tracked" in ci
     assert "git ls-files -- core/ibkr_auth_private.py secrets vendor" in ci
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env.local",
+        ".env.production",
+        "certs/server.key",
+        "config/gateway_cert.pem",
+        ".claude/settings.local.json",
+    ],
+)
+def test_env_variants_keys_certificates_and_claude_dir_are_git_ignored(path):
+    assert _git("check-ignore", "-q", path).returncode == 0
+
+
+@pytest.mark.parametrize("path", [".env.example", "tests/fixtures/gateway_cert.pem"])
+def test_env_example_and_the_test_certificate_are_not_ignored(path):
+    assert _git("check-ignore", "-q", path).returncode == 1
+
+
+def test_nothing_is_tracked_under_claude_so_ignoring_it_is_safe():
+    assert _git("ls-files", "--", ".claude").stdout.strip() == ""
+
+
+def test_dockerignore_excludes_env_variants_keys_and_certificates():
+    lines = _ignore_lines(".dockerignore")
+    for expected in (
+        ".env.*",
+        "!.env.example",
+        "*.key",
+        "*.pem",
+        "!tests/fixtures/*.pem",
+        ".claude/",
+    ):
+        assert expected in lines, expected
+    assert lines.index("!.env.example") > lines.index(".env.*")
+
+
+def test_ci_fails_on_tracked_env_variants_and_keys():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "git ls-files -- '.env' '.env.*' '*.key'" in ci
+    assert "grep -Fxv '.env.example'" in ci

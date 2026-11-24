@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.pyc
@@ -11,8 +13,8 @@ models/artifacts/*/model.pkl
 models/artifacts/*/model.keras
 models/artifacts/*/scaler.gz
 
-# Claude Code subagent worktrees
-.claude/worktrees/
+# Claude Code local settings and subagent worktrees (nothing under .claude/ is tracked)
+.claude/
 
 # Private IBKR login module (never commit)
 core/ibkr_auth_private.py
@@ -24,3 +26,8 @@ secrets/*
 !secrets/*.example
 !secrets/README.md
 vendor/
+
+# Private keys and certificates (the test certificate fixture is public)
+*.key
+*.pem
+!tests/fixtures/*.pem
