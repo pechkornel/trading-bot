@@ -15,6 +15,7 @@ and the Voyz/ibind library. See SECURITY.md for the audit and known caveats.
 from __future__ import annotations
 
 import os
+import re
 import ssl
 import time
 from dataclasses import dataclass
@@ -77,6 +78,16 @@ def _translate_period(period: str) -> str:
     if period in _PERIOD_MAP:
         return _PERIOD_MAP[period]
     raise ValueError(f"unrecognised period {period!r}; CPGW expects e.g. 5d, 1m, 2y")
+
+
+_ACCOUNT_SHAPED = re.compile(r"\b[A-Z]{1,2}\d{5,}\b")
+
+
+def mask_account(text: str, account_id: object = None) -> str:
+    """Mask the account id, and anything shaped like one, as `***` plus its last 2 characters."""
+    if isinstance(account_id, str) and account_id:
+        text = text.replace(account_id, "***" + account_id[-2:])
+    return _ACCOUNT_SHAPED.sub(lambda m: "***" + m.group(0)[-2:], text)
 
 
 # ---- exceptions ----------------------------------------------------------
@@ -176,21 +187,25 @@ class CPGWClient:
         self._client.close()
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+
+        def masked(text: str) -> str:
+            return mask_account(text, self.account_id)
+
         try:
             r = self._client.request(method, path, **kwargs)
         except httpx.HTTPError as e:
-            raise CPGWError(f"HTTP transport error on {method} {path}: {e}") from e
+            raise CPGWError(masked(f"HTTP transport error on {method} {path}: {e}")) from e
 
         if r.status_code == 401:
-            raise NotAuthenticatedError(f"{method} {path} -> 401, session expired")
+            raise NotAuthenticatedError(masked(f"{method} {path} -> 401, session expired"))
         if r.status_code >= 400:
-            raise CPGWError(f"{method} {path} -> {r.status_code}: {r.text[:300]}")
+            raise CPGWError(masked(f"{method} {path} -> {r.status_code}: {r.text[:300]}"))
         if not r.text:
             return None
         try:
             return r.json()
         except ValueError as e:
-            raise CPGWError(f"{method} {path} returned non-JSON: {r.text[:300]}") from e
+            raise CPGWError(masked(f"{method} {path} returned non-JSON: {r.text[:300]}")) from e
 
     # ---- session ----
 
@@ -240,7 +255,7 @@ class CPGWClient:
         # caller is expected to have authenticated against the right type.
         acct_id = accts[0].get("id") or accts[0].get("accountId")
         if not acct_id:
-            raise CPGWError(f"Account response missing 'id': {accts[0]}")
+            raise CPGWError(mask_account(f"Account response missing 'id': {accts[0]}"))
         self.account_id = acct_id
         return acct_id
 

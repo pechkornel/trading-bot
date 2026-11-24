@@ -6,14 +6,13 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from core.config import PortfolioConfig
+from core.cpgw_client import mask_account
 
 MAX_ERROR_CHARS = 160
-_ACCOUNT_SHAPED = re.compile(r"\b[A-Z]{1,2}\d{5,}\b")
 
 
 @dataclass(frozen=True)
@@ -56,11 +55,8 @@ def parse_net_liquidation(summary: object) -> tuple[float, str | None]:
     return value, currency if isinstance(currency, str) else None
 
 
-def _mask_account(text: str, account_id: object) -> str:
-    """Mask the account id, and anything shaped like one, as `***` plus its last 2 characters."""
-    if isinstance(account_id, str) and account_id:
-        text = text.replace(account_id, "***" + account_id[-2:])
-    return _ACCOUNT_SHAPED.sub(lambda m: "***" + m.group(0)[-2:], text)
+# The old private name keeps working. The shared implementation lives in core.cpgw_client.
+_mask_account = mask_account
 
 
 def _usable_last(

@@ -43,7 +43,7 @@ from core.config import (
     load_app_config,
     load_keeper_config,
 )
-from core.cpgw_client import CPGWClient, CPGWError, NotAuthenticatedError
+from core.cpgw_client import CPGWClient, CPGWError, NotAuthenticatedError, mask_account
 from core.ibkr_auth import AUTH_BACKEND, login
 from core.secret_store import Redactor, load_login_secrets
 from live import keeper_policy as policy
@@ -171,12 +171,12 @@ class Keeper:
 
     def _event(self, level: str, message: str) -> None:
         try:
-            self.storage.log_event(level, SOURCE, self.redactor.redact(message))
+            self.storage.log_event(level, SOURCE, mask_account(self.redactor.redact(message)))
         except Exception:  # noqa: BLE001 - logging must not stop the keeper
             pass
 
     def _alert(self, level: str, text: str, *, key: str, cooldown_sec: float | None = None) -> None:
-        body = f"{level.upper()} {self.redactor.redact(text)}"
+        body = f"{level.upper()} {mask_account(self.redactor.redact(text))}"
         try:
             self.notifier.send("session", body, dedupe_key=key, cooldown_sec=cooldown_sec)
         except Exception:  # noqa: BLE001
@@ -472,7 +472,7 @@ class Keeper:
         self._event(
             "info", f"login OK, account={account}, session written to {self.session_file.name}"
         )
-        print(f"[cpgw_keeper] login OK, account={account}")
+        print(f"[cpgw_keeper] login OK, account={mask_account(account)}")
         self._alert("info", "login OK, session restored", key="login_ok", cooldown_sec=0)
 
     def _finish_login(self, cookie: str) -> str:
