@@ -2,7 +2,7 @@
 
 ## Summary
 
-- Generated: 2026-11-24 01:40 UTC
+- Generated: 2026-11-24 01:57 UTC
 - Data downloaded: 2026-11-24T01:39:49Z
 - yfinance version: 1.8.0
 - Start date: 2008-05-29
@@ -39,9 +39,10 @@ Daily bars from Yahoo Finance through yfinance (`Close` and `Adj Close`, `auto_a
 ## Assumptions and deviations from live
 
 - Signals use Yahoo split-adjusted `Close`. P&L uses `Adj Close` (dividends reinvested). Adjusted closes are never passed to the sleeve, the scoring code or the macro fetcher.
-- Timing: each trading day is evaluated once at 21:00 UTC (the 16:00 New York close). A decision made at the close of day t is filled at the close of the next calendar day. The strategy starts in cash and waits for the first Friday decision, like the live sleeve (the weekly rebalance falls on Friday's close).
-- Costs: `cost_bps / 10000 * turnover` of equity on the fill day, where turnover is the sum of absolute weight changes over assets (cash excluded). A first buy from cash is 1.0, a full switch is 2.0. The first entry is charged for every portfolio.
+- Timing: each trading day is evaluated once at 21:00 UTC (the 16:00 New York close). A decision made at the close of day t is filled at the close of the next trading day. The strategy starts in cash and waits for the first decision on the rebalance weekday (Friday in the live config). A Friday decision is therefore filled at the next trading day's close, usually Monday. See the weekday sensitivity table.
+- Costs: `cost_bps / 10000 * turnover` of equity on the fill day, where turnover is the sum of absolute weight changes over assets (cash excluded), so it is two-way (buys plus sells). A first buy from cash is 1.0, a full switch is 2.0. The first entry is charged for every portfolio.
 - Cash earns 0. Weight not invested earns nothing.
+- Momentum, trend and the HYG/LQD credit ratio use raw `Close` (price return, no dividends), exactly as the live bot does. Bond ETFs and BIL are understated by their yield, and distribution days (for example DBC each December) look like price drops for 12 months. This is a property of the live bot's signals, not of the backtest.
 - Holdings given to the sleeve are synthetic fractional shares on a constant notional, so the drift rule sees true current weights. Live uses integer shares and DAY limit orders at plus or minus 5 bps; the backtest fills fractional weights at the next close.
 - Sleeve equity is marked to market. Live measures drift against a fixed starting-equity budget (the known gap 'Static starting equity' in `docs/TRADING_LOGIC.md` section 8).
 - The re-entry cooldown is called with live semantics, but with one decision per day at a fixed clock the next decision is exactly 86400 s later, which counts as free. It never binds in the replay.
@@ -50,13 +51,15 @@ Daily bars from Yahoo Finance through yfinance (`Close` and `Adj Close`, `auto_a
 - Fed funds (DFF) is not downloaded, so the macro snapshot is never `complete`. This has no effect on scores because the neutral guard also needs VIX and the curve to be missing.
 - HYG and LQD are downloaded because the live macro score uses the credit ratio trend for equity and bond buckets.
 - Benchmarks: SPY buy and hold; 60% SPY and 40% AGG; equal weight over the core universe (BIL included). The two rebalanced benchmarks decide on the last trading day of each month and fill on the first trading day of the next month, at the same cost rate as the strategy run they are compared with.
-- The risk-free rate for Sharpe and Sortino is the BIL daily adjusted close return.
+- The risk-free rate for Sharpe and Sortino is the BIL daily adjusted close return. It includes BIL's expense ratio (about 0.135%), which slightly flatters every Sharpe.
+- CAGR uses 252 trading days per year: `(end / start) ** (252 / n_returns) - 1`.
 - Risk-off share: share of trading days positioned on a risk-off decision, from the fill day of that decision to the next fill.
 - Start date: first trading day on which every required ticker has enough raw closes for the longest signal window, and T10Y2Y has an observation before it.
 - Trading days are dates on which all core ETFs have a raw and an adjusted close. Macro tickers are joined as of the last value on or before the decision day.
 
 Known gaps between this backtest and live trading:
 
+- Live evaluates on the first open cycle on Friday using intraday data and fills the same day with DAY limit orders. The backtest decides at Friday's close and fills at the next trading day's close (usually Monday). The weekday sensitivity table shows how much the choice of weekday matters.
 - Live fills are DAY limit orders at plus or minus 5 bps on integer shares and may be partial or missed. The backtest fills fractional weights at the next close.
 - Live decides when the runner wakes up on its schedule, not at a fixed close.
 - Live uses a fixed sleeve budget for drift; the backtest marks it to market.
@@ -66,14 +69,49 @@ Known gaps between this backtest and live trading:
 
 ## Headline results
 
-Strategy and benchmarks, base cost 5 bps.
+Strategy and benchmarks, base cost 5 bps. Turnover is two-way (buys plus sells): a full switch counts as 200%.
 
-| Portfolio | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Peak | Trough | Recovery | Calmar | Turnover per year | Risk-off share |
+| Portfolio | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Peak | Trough | Recovery | Calmar | Turnover per year (buys plus sells) | Risk-off share |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Strategy (core sleeve) | 3.62% | 11.93% | 0.25 | 0.34 | -30.48% | 2021-11-08 | 2023-10-04 | 2025-10-08 | 0.12 | 1303% | 12.8% |
 | SPY buy and hold | 11.02% | 19.72% | 0.56 | 0.79 | -50.70% | 2008-06-05 | 2009-03-09 | 2011-02-08 | 0.22 | 5% | n/a |
 | 60/40 (SPY/AGG) | 8.03% | 11.88% | 0.60 | 0.84 | -32.79% | 2008-06-05 | 2009-03-09 | 2010-04-14 | 0.24 | 27% | n/a |
 | Equal weight (core ETFs) | 5.12% | 9.66% | 0.43 | 0.60 | -28.41% | 2008-06-05 | 2008-11-20 | 2010-04-14 | 0.18 | 40% | n/a |
+
+## Rebalance weekday sensitivity
+
+Base config at 5 bps, changing only the weekday of the weekly rebalance (0 = Monday to 4 = Friday). The weekday set in the live config is marked. The strategy decides at that day's close and fills at the next trading day's close.
+
+| Weekday | CAGR | Volatility | Sharpe | Max drawdown |
+|---|---|---|---|---|
+| 0 Mon | 4.17% | 11.95% | 0.29 | -23.99% |
+| 1 Tue | 5.71% | 11.90% | 0.42 | -26.91% |
+| 2 Wed | 5.81% | 12.04% | 0.42 | -26.22% |
+| 3 Thu | 4.81% | 12.03% | 0.34 | -28.09% |
+| 4 Fri (live) | 3.62% | 11.93% | 0.25 | -30.48% |
+
+## Subperiods
+
+CAGR and Sharpe over calendar-year ranges, base cost. The first and last ranges can be partial. CAGR uses 252 trading days per year.
+
+| Portfolio | 2008 to 2012 CAGR | 2008 to 2012 Sharpe | 2013 to 2019 CAGR | 2013 to 2019 Sharpe | 2020 to 2026 CAGR | 2020 to 2026 Sharpe |
+|---|---|---|---|---|---|---|
+| Strategy (core sleeve) | 3.01% | 0.26 | 3.75% | 0.38 | 3.89% | 0.15 |
+| SPY buy and hold | 2.60% | 0.22 | 14.61% | 1.08 | 13.29% | 0.59 |
+| 60/40 (SPY/AGG) | 4.64% | 0.35 | 9.91% | 1.22 | 8.43% | 0.49 |
+| Equal weight (core ETFs) | 4.97% | 0.41 | 4.00% | 0.56 | 6.38% | 0.40 |
+
+## Uncertainty
+
+Circular block bootstrap of daily excess returns: 63 day blocks, 2000 draws, seed 20240611, 4650 days. Each draw uses the same blocks for the strategy and every benchmark, so differences are paired. Intervals are 95% percentile intervals. Share better is the share of draws in which the strategy Sharpe is higher than the benchmark's. An interval that contains 0 means the difference is not statistically distinguishable from noise.
+
+Strategy Sharpe: 0.25, 95% interval -0.16 to 0.69.
+
+| Strategy minus | Sharpe difference | 95% interval | Share of draws better |
+|---|---|---|---|
+| SPY buy and hold | -0.31 | -0.80 to 0.19 | 9.2% |
+| 60/40 (SPY/AGG) | -0.35 | -0.84 to 0.14 | 6.8% |
+| Equal weight (core ETFs) | -0.18 | -0.64 to 0.30 | 21.3% |
 
 ## Rebalance triggers
 
@@ -113,7 +151,7 @@ Evaluations by trigger and fills actually traded, base config.
 
 Each variant changes only config fields and the cost rate.
 
-| Variant | Description | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Calmar | Turnover per year | Risk-off share | Cost (bps) |
+| Variant | Description | CAGR | Volatility | Sharpe | Sortino | Max drawdown | Calmar | Turnover per year (buys plus sells) | Risk-off share | Cost (bps) |
 |---|---|---|---|---|---|---|---|---|---|---|
 | base | Live config, 5 bps cost. | 3.62% | 11.93% | 0.25 | 0.34 | -30.48% | 0.12 | 1303% | 12.8% | 5 |
 | momentum_only | Momentum weight 1.0, macro and trend 0. | 4.21% | 11.92% | 0.30 | 0.41 | -26.65% | 0.16 | 1108% | 12.8% | 5 |

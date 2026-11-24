@@ -418,6 +418,37 @@
       }
     }
   },
+  "bootstrap": {
+    "block_days": 63,
+    "days": 4650,
+    "draws": 2000,
+    "seed": 20240611,
+    "strategy_sharpe": {
+      "hi": 0.6894,
+      "lo": -0.156875,
+      "point": 0.248552
+    },
+    "vs": {
+      "equal_weight": {
+        "diff_point": -0.179922,
+        "hi": 0.300494,
+        "lo": -0.641176,
+        "share_better": 0.2135
+      },
+      "sixty_forty": {
+        "diff_point": -0.348261,
+        "hi": 0.139039,
+        "lo": -0.837508,
+        "share_better": 0.0675
+      },
+      "spy_buy_hold": {
+        "diff_point": -0.31242,
+        "hi": 0.188367,
+        "lo": -0.795056,
+        "share_better": 0.092
+      }
+    }
+  },
   "data": {
     "downloaded_at": "2026-11-24T01:39:49Z",
     "fred": {
@@ -688,6 +719,76 @@
         "drift": 0
       },
       "volatility": 0.119339
+    }
+  },
+  "subperiods": {
+    "Strategy": {
+      "2008 to 2012": {
+        "cagr": 0.030057,
+        "days": 1156,
+        "sharpe": 0.263539
+      },
+      "2013 to 2019": {
+        "cagr": 0.037522,
+        "days": 1762,
+        "sharpe": 0.383153
+      },
+      "2020 to 2026": {
+        "cagr": 0.038893,
+        "days": 1732,
+        "sharpe": 0.148343
+      }
+    },
+    "equal_weight": {
+      "2008 to 2012": {
+        "cagr": 0.049678,
+        "days": 1156,
+        "sharpe": 0.412823
+      },
+      "2013 to 2019": {
+        "cagr": 0.040049,
+        "days": 1762,
+        "sharpe": 0.562316
+      },
+      "2020 to 2026": {
+        "cagr": 0.063823,
+        "days": 1732,
+        "sharpe": 0.402686
+      }
+    },
+    "sixty_forty": {
+      "2008 to 2012": {
+        "cagr": 0.046423,
+        "days": 1156,
+        "sharpe": 0.35031
+      },
+      "2013 to 2019": {
+        "cagr": 0.099124,
+        "days": 1762,
+        "sharpe": 1.215067
+      },
+      "2020 to 2026": {
+        "cagr": 0.084338,
+        "days": 1732,
+        "sharpe": 0.488717
+      }
+    },
+    "spy_buy_hold": {
+      "2008 to 2012": {
+        "cagr": 0.026043,
+        "days": 1156,
+        "sharpe": 0.22017
+      },
+      "2013 to 2019": {
+        "cagr": 0.146064,
+        "days": 1762,
+        "sharpe": 1.080734
+      },
+      "2020 to 2026": {
+        "cagr": 0.132867,
+        "days": 1732,
+        "sharpe": 0.585627
+      }
     }
   },
   "trading_days": 4651,
@@ -1027,6 +1128,48 @@
         "drift": 0
       },
       "volatility": 0.113311
+    }
+  },
+  "weekday_sensitivity": {
+    "0": {
+      "cagr": 0.041675,
+      "live": false,
+      "max_drawdown": -0.239885,
+      "name": "Mon",
+      "sharpe": 0.292791,
+      "volatility": 0.119466
+    },
+    "1": {
+      "cagr": 0.057072,
+      "live": false,
+      "max_drawdown": -0.269136,
+      "name": "Tue",
+      "sharpe": 0.416887,
+      "volatility": 0.119029
+    },
+    "2": {
+      "cagr": 0.058073,
+      "live": false,
+      "max_drawdown": -0.262218,
+      "name": "Wed",
+      "sharpe": 0.421397,
+      "volatility": 0.120355
+    },
+    "3": {
+      "cagr": 0.048078,
+      "live": false,
+      "max_drawdown": -0.280929,
+      "name": "Thu",
+      "sharpe": 0.342587,
+      "volatility": 0.120261
+    },
+    "4": {
+      "cagr": 0.036171,
+      "live": true,
+      "max_drawdown": -0.304754,
+      "name": "Fri",
+      "sharpe": 0.248552,
+      "volatility": 0.119339
     }
   }
 }
