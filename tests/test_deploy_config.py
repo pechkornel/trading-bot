@@ -385,3 +385,13 @@ def test_keeper_drops_capabilities_like_the_gateway():
     assert keeper["security_opt"] == ["no-new-privileges:true"]
     assert keeper["cap_drop"] == services["ibkr_gateway"]["cap_drop"]
     assert keeper["security_opt"] == services["ibkr_gateway"]["security_opt"]
+
+
+def test_fetch_gateway_curl_forces_https_and_tls12():
+    curl_lines = [
+        line for line in _read("scripts/fetch_gateway.sh").splitlines() if line.startswith("curl ")
+    ]
+    assert curl_lines
+    for line in curl_lines:
+        assert "--proto '=https'" in line
+        assert "--tlsv1.2" in line

@@ -30,7 +30,7 @@ sha256_of() {
 mkdir -p "$DEST_DIR"
 tmp="$DEST.part"
 rm -f "$tmp"
-curl -fsSL -o "$tmp" "$URL"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp" "$URL"
 
 actual="$(sha256_of "$tmp")"
 if [[ "$actual" != "$expected" ]]; then
