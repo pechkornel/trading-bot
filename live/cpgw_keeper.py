@@ -66,6 +66,7 @@ LOCKOUT_REMINDER_SEC = 86400
 UNSURE_ALERT_AFTER_TICKS = 5
 PAPER_CHECK_TRIES = 3
 PAPER_CHECK_DELAY_SEC = 2.0
+SESSION_FILE_STALE_SEC = 86400
 SOURCE = "cpgw_keeper"
 
 
@@ -388,10 +389,34 @@ class Keeper:
         self._paper_unsure = False
         self._last_paper_alert = None
         self._session_verified = True
+        self._ensure_session_file(account)
         if self.state.authenticated_since is None:
             self.state.authenticated_since = now
             self._save()
         self._event("info", f"existing session verified (account={account}); no login needed")
+
+    def _ensure_session_file(self, account: str) -> None:
+        """A session the keeper adopted never went through a login here, so write the
+        session file when it is missing, for another account, or older than a day. The
+        cookie is the one from a login with an unsure paper check, else the old file's,
+        else empty (the gateway holds the session itself)."""
+        existing = _read_session_file(self.session_file)
+        pending, self._pending_cookie = self._pending_cookie, None
+        if pending is None and existing is not None:
+            try:
+                age = time.time() - float(existing.get("updated_at") or 0)
+            except (TypeError, ValueError):
+                age = SESSION_FILE_STALE_SEC
+            if existing.get("account_id") == account and age < SESSION_FILE_STALE_SEC:
+                return
+        cookie = pending
+        if cookie is None:
+            old = (existing or {}).get("cookie")
+            cookie = old if isinstance(old, str) else ""
+        try:
+            _write_session(cookie, account, self.session_file)
+        except OSError as exc:
+            self._event("error", f"cannot write the session file: {type(exc).__name__}")
 
     def _on_paper_check_unsure(self) -> None:
         """No account list after the retries: the session is kept, nothing is locked.

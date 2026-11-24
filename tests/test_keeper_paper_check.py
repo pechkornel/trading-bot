@@ -108,3 +108,58 @@ def test_a_later_tick_verifies_the_session_after_the_gateway_recovers(env):
     keeper.tick()
     assert keeper._session_verified
     assert env.login_calls == 1
+
+
+# ---- an adopted session gets a session file ----
+
+
+def test_adopted_session_writes_the_session_file_with_an_empty_cookie(env):
+    import json
+
+    env.client.authenticated = True
+    keeper = make_keeper(env)
+    keeper.start()
+    data = json.loads(env.session_file.read_text())
+    assert data["cookie"] == ""
+    assert data["account_id"] == "DU1234567"
+
+
+def test_adopted_session_leaves_a_fresh_matching_file_alone(env):
+    import json
+    import time
+
+    env.session_file.write_text(
+        json.dumps({"cookie": "c=1", "account_id": "DU1234567", "updated_at": time.time()})
+    )
+    before = env.session_file.read_text()
+    env.client.authenticated = True
+    make_keeper(env).start()
+    assert env.session_file.read_text() == before
+
+
+def test_adopted_session_rewrites_a_stale_file_and_keeps_its_cookie(env):
+    import json
+    import time
+
+    env.session_file.write_text(
+        json.dumps({"cookie": "c=1", "account_id": "DU1234567", "updated_at": time.time() - 10**6})
+    )
+    env.client.authenticated = True
+    make_keeper(env).start()
+    data = json.loads(env.session_file.read_text())
+    assert data["cookie"] == "c=1"
+    assert data["updated_at"] > time.time() - 60
+
+
+def test_login_with_unsure_paper_check_writes_its_cookie_once_verified(env):
+    import json
+
+    script_accounts(env, [CPGWError("boom")])
+    keeper = make_keeper(env)
+    keeper.tick()
+    assert not env.session_file.exists()
+    script_accounts(env, [[{"id": "DU1234567"}]])
+    keeper.tick()
+    data = json.loads(env.session_file.read_text())
+    assert data["cookie"] == "x-sess-uuid=fake"
+    assert data["account_id"] == "DU1234567"
