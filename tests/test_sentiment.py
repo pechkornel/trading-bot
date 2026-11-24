@@ -49,7 +49,9 @@ def patch_urlopen(monkeypatch, payload=None, error=None) -> FakeUrlopen:
 
 
 def provider() -> AlphaVantageProvider:
-    return AlphaVantageProvider(api_key="test-key")
+    # A fixed clock keeps the request URL (time_from) independent of the real time.
+    fixed = datetime(2026, 11, 24, 12, 30, tzinfo=timezone.utc)
+    return AlphaVantageProvider(api_key="test-key", clock=lambda: fixed)
 
 
 # ---- stub and factory ----
@@ -185,6 +187,16 @@ def test_default_lookback_is_24_hours(monkeypatch):
     assert p.lookback_hours == 24
     p.fetch_batch(["AAPL"])
     assert "time_from=20261123T1230" in fake.requests[0].full_url
+
+
+def test_time_from_crosses_midnight_into_the_previous_day(monkeypatch):
+    # 03:00 UTC minus 6 hours is 21:00 on the previous day: the date must move too.
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    early = datetime(2026, 11, 24, 3, 0, tzinfo=timezone.utc)
+    AlphaVantageProvider(api_key="test-key", lookback_hours=6, clock=lambda: early).fetch_batch(
+        ["AAPL"]
+    )
+    assert "time_from=20261123T2100" in fake.requests[0].full_url
 
 
 def test_lookback_none_omits_time_from(monkeypatch):
