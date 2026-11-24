@@ -75,6 +75,52 @@ docker/      Dockerfile and the optional gateway image; docker-compose.yml runs 
 - The dashboard has no authentication, so it binds to `127.0.0.1` by default. Use
   `tailscale serve` for tailnet access, never Funnel.
 
+## Results
+
+`backtest/` replays the live **core sleeve** day by day by calling the bot's own sleeve and
+macro code (see [ADR 0002](docs/adr/0002-own-backtest-replay.md)). Period 2008-05-29 to
+2026-11-20, 5 bps cost per unit of turnover, parameters exactly as in `config/symbols.yaml`.
+
+| Portfolio | CAGR | Volatility | Sharpe | Max drawdown |
+|---|---:|---:|---:|---:|
+| Core sleeve (strategy) | 3.62% | 11.93% | 0.25 | -30.48% |
+| SPY buy and hold | 11.02% | 19.72% | 0.56 | -50.70% |
+| 60/40 (SPY/AGG) | 8.03% | 11.88% | 0.60 | -32.79% |
+| Equal weight (10 core ETFs) | 5.12% | 9.66% | 0.43 | -28.41% |
+
+![Equity and drawdown](docs/backtest/equity_curve.png)
+
+**The core sleeve underperformed all three benchmarks over this period.** Its CAGR and Sharpe
+are lower than SPY, 60/40 and equal weight. Its drawdown was smaller than SPY and 60/40 but
+not smaller than equal weight. In the ablations, disabling the risk-off switch improved it
+(CAGR 4.86%, Sharpe 0.36, max drawdown -17.66%), and so did dropping the macro score or
+using momentum only. No variant beat 60/40 or SPY. Full tables, calendar-year returns and the
+list of deviations from live are in [docs/backtest/results.md](docs/backtest/results.md).
+
+Limitations:
+
+- Core sleeve only. The sentiment satellite and the tactical sleeve are not tested.
+- The universe is today's ETF list, picked with hindsight (survivorship). ETF start dates set
+  the start of the test.
+- Parameters were fixed before the test and not optimised.
+- One decision a day at the close, filled at the next close with fractional weights. Live uses
+  DAY limit orders on integer shares.
+- Costs are a flat bps rate: no slippage, taxes or fees. Cash earns 0.
+- Drift is measured against marked-to-market equity. Live uses a fixed budget.
+- Macro inputs are Yahoo and FRED final data, not point-in-time vintages, so revisions are
+  not modelled.
+- The re-entry cooldown never binds in the replay.
+- Turnover is high (about 13x per year), so the result is cost sensitive: 4.29% CAGR at 0 bps,
+  1.61% at 20 bps.
+
+To reproduce (network needed; the first run downloads the price and macro series and caches
+them in `data/cache/backtest/`):
+
+```sh
+pip install -r requirements-backtest.txt
+python -m backtest.run               # add --refresh to download everything again
+```
+
 ## Run it
 
 ```sh
@@ -84,6 +130,7 @@ cp .env.example .env                       # fill in your own values
 
 python -m live.portfolio_runner --once     # one dry-run cycle of every enabled sleeve
 uvicorn dashboard.app:app --host 127.0.0.1 --port 8765   # dashboard
+python -m backtest.run                                   # core sleeve backtest (needs requirements-backtest.txt)
 docker compose --profile auto up -d        # or everything in Docker
 ```
 

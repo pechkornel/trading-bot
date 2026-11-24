@@ -59,6 +59,13 @@ The whole bot is Python. One language end-to-end = one venv, one dep tree, one s
 | **tzdata** | ≥ 2025.2 | IANA time zone data for `zoneinfo` (Windows has none) |
 | **scipy** | ≥ 1.10 | `linregress` for the linear-regression channel indicator |
 
+Backtest-only dependencies (`requirements-backtest.txt`, not installed in Docker or CI):
+
+| Library | Used for |
+|---|---|
+| **yfinance** | Daily ETF, VIX, DXY, HYG and LQD history for `python -m backtest.run`, cached as CSV in `data/cache/backtest/`. |
+| **matplotlib** | The equity and drawdown chart `docs/backtest/equity_curve.png`. |
+
 No `polars`, no `xarray`, no fancy data frameworks. The whole bot works on at most a few thousand rows per cycle - pandas is fast enough and everyone reads it.
 
 ---
@@ -162,7 +169,7 @@ Why this exact split (Docker + Tailscale + systemd-for-Java-only): the bot itsel
 
 | Library | Why not |
 |---|---|
-| `backtrader`, `zipline`, `vectorbt` | Big abstractions for backtesting we don't need yet. Phase 8+ if we add a real backtester. |
+| `backtrader`, `zipline`, `vectorbt` | Big abstractions. The backtest is our own small replay loop in `backtest/` that calls the live sleeve and macro code, so the rules are never copied (see `docs/adr/0002-own-backtest-replay.md`). |
 | `pyfolio`, `quantstats` | Performance analytics; same - when there's enough live history to analyse. |
 | `riskfolio-lib`, `pypfopt` | Portfolio optimizer libs. Our All-Weather sleeve is fixed-weight; risk parity / mean-variance would be the trigger to pull these in. |
 | `ta-lib` (C extension) | Pure-Python indicators in `core/indicators.py` are fast enough; ta-lib needs a system library and adds install pain. |
