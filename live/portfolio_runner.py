@@ -225,8 +225,7 @@ class PortfolioRunner:
             self.client, self.portfolio_cfg, self._last_gateway_reading(), now
         )
         equity_note = f"cycle={cycle_id} {format_equity_event(reading)}"
-        deliberate = reading.reason.startswith("disabled")
-        level = "info" if reading.source == "gateway" or deliberate else "warn"
+        level = "info" if reading.source == "gateway" or reading.disabled else "warn"
         self.storage.log_event(level, "portfolio", equity_note)
         print(f"[portfolio] {equity_note}")
         if reading.source == "gateway":
