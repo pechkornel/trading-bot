@@ -98,7 +98,13 @@ universe:
     timeframe_label: "daily"
 
 portfolio:
-  starting_equity: 100000.0
+  starting_equity: 100000.0              # fallback total equity when the paper account value is unavailable or rejected,
+                                         # and the anchor of the range check below
+  use_account_equity: true               # size sleeves from the paper account's net liquidation; false = always starting_equity
+  equity_min_ratio: 0.25                 # reject a net liquidation below this multiple of starting_equity
+  equity_max_ratio: 4.0                  # reject a net liquidation above this multiple of starting_equity
+                                         # (a 1,000,000 paper account needs starting_equity: 1000000)
+  equity_currency: "USD"                 # expected currency of the account value (a missing currency is accepted)
   cycle_interval_sec: 3600               # one decision cycle per hour
                                          # (core acts at most once per US Eastern day:
                                          #  on Friday or on drift;
