@@ -89,6 +89,7 @@ class PortfolioRunner:
     # Class level defaults, so a runner built without __init__ (tests) sends nothing.
     notifier: Any = None
     _cookie: str = ""
+    _session_stamp: Any = None  # updated_at of the session file last applied
     _equity_note: str = ""
 
     def __init__(
@@ -196,6 +197,7 @@ class PortfolioRunner:
                 "runs and writes logs/cpgw_session.json."
             )
         self._cookie = str(session.get("cookie") or "")
+        self._session_stamp = session.get("updated_at")
         self.client = CPGWClient(cookie=self._cookie, port=self.app_cfg.ib.port)
         if session.get("account_id"):
             self.client.account_id = session["account_id"]
@@ -256,10 +258,17 @@ class PortfolioRunner:
     def _cycle(self) -> None:
         assert self.client is not None
         # Refresh cookie from the keeper's session file every cycle
+        # Follow the file whenever the keeper rewrote it, even to an empty cookie
+        # (a re-login that left the gateway holding the session), so a stale cookie
+        # is never kept. A missing file changes nothing.
         session = read_session()
-        if session and session.get("cookie"):
-            self._cookie = str(session["cookie"])
-            self.client.update_cookie(session["cookie"])
+        if session:
+            stamp = session.get("updated_at")
+            cookie = str(session.get("cookie") or "")
+            if stamp != self._session_stamp or cookie != self._cookie:
+                self._session_stamp = stamp
+                self._cookie = cookie
+                self.client.update_cookie(cookie)
 
         cycle_id = uuid.uuid4().hex[:12]
         # One equity reading per cycle, shared by both sleeves.
