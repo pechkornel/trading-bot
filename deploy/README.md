@@ -108,12 +108,11 @@ PAPER=true
 DRY_RUN=true
 IB_PORT=5000
 DASHBOARD_HOST=127.0.0.1
-IBKR_USERNAME=<your paper username>
-IBKR_PASSWORD=<your paper password>
 CPGW_CA_FILE=/app/gateway_tls/cert.pem
 SENTIMENT_PROVIDER=stub
 ```
 
+- The IBKR login is not in `.env`. It goes in the file `secrets/ibkr_login` (step 4).
 - `CPGW_CA_FILE` is correct for the Docker gateway used in this section. With the host Java gateway, see "Java gateway: export its certificate once" in section 0.
 - Do not put `IBKR_USERNAME` or `IBKR_PASSWORD` in `.env`. The keeper refuses to start while `IBKR_PASSWORD` is set. The login goes in `secrets/ibkr_login` (step 4).
 - `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`. The sentiment sleeve is off either way (allocation 0%).

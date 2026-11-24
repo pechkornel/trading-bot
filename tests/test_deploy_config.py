@@ -418,3 +418,12 @@ def test_fetch_gateway_curl_forces_https_and_tls12():
     for line in curl_lines:
         assert "--proto '=https'" in line
         assert "--tlsv1.2" in line
+
+
+LOGIN_IN_ENV = re.compile(r"^\s*IBKR_(USERNAME|PASSWORD)\s*=", re.MULTILINE)
+
+
+def test_deploy_readme_never_tells_you_to_put_the_login_in_env():
+    # The login lives in secrets/ibkr_login. A sample .env line with it would
+    # also trip the keeper's refusal to start while IBKR_PASSWORD is set.
+    assert not LOGIN_IN_ENV.search(_read("deploy/README.md"))
