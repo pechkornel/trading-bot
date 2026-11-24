@@ -61,7 +61,7 @@ models/      training (XGBoost, LSTM) and the artifact registry
 live/        portfolio runner, sentiment worker, SQLite storage, notifications
 dashboard/   FastAPI + HTMX web UI: status, sleeves, targets, orders, models, logs, start/stop
 deploy/      Ubuntu setup, systemd units, backups
-docker/      Dockerfile; docker-compose.yml runs dashboard, portfolio runner and sentiment worker
+docker/      Dockerfile and the optional gateway image; docker-compose.yml runs dashboard, portfolio runner and sentiment worker
 ```
 
 ## Safety
@@ -70,7 +70,10 @@ docker/      Dockerfile; docker-compose.yml runs dashboard, portfolio runner and
   `core.config.assert_paper_mode()` before any broker connection is opened.
 - **Dry run by default**: decisions are logged, orders are only sent with `--live`.
 - The automated broker login is **not included** in this public version (`core/ibkr_auth.py` is
-  a stub). See [SECURITY.md](SECURITY.md).
+  a stub). You can add your own as `core/ibkr_auth_private.py`, which is git-ignored and must
+  never be committed. See [SECURITY.md](SECURITY.md).
+- The dashboard has no authentication, so it binds to `127.0.0.1` by default. Use
+  `tailscale serve` for tailnet access, never Funnel.
 
 ## Run it
 
@@ -80,7 +83,7 @@ pip install -r requirements.txt            # add requirements-train.txt to train
 cp .env.example .env                       # fill in your own values
 
 python -m live.portfolio_runner --once     # one dry-run cycle of every enabled sleeve
-uvicorn dashboard.app:app --port 8765      # dashboard
+uvicorn dashboard.app:app --host 127.0.0.1 --port 8765   # dashboard
 docker compose --profile auto up -d        # or everything in Docker
 ```
 
