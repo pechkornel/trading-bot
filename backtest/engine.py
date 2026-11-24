@@ -77,7 +77,7 @@ def simulate(
             equity[i] = equity[i - 1]
 
         # (2) fill the pending decision at this close
-        if pending:
+        if pending is not None:
             target = np.zeros(len(symbols))
             for sym, weight in pending.items():
                 if sym not in symbols:
