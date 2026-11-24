@@ -12,3 +12,6 @@ models/artifacts/*/scaler.gz
 
 # Claude Code subagent worktrees
 .claude/worktrees/
+
+# Private IBKR login module (never commit)
+core/ibkr_auth_private.py

@@ -30,7 +30,13 @@ from typing import Any
 
 from core.config import LOGS_DIR, assert_paper_mode, load_app_config
 from core.cpgw_client import CPGWClient
-from core.ibkr_auth import IBKRAuthError, IbkrCredentials, MaxLoginAttempts, login
+from core.ibkr_auth import (
+    AUTH_BACKEND,
+    IBKRAuthError,
+    IbkrCredentials,
+    MaxLoginAttempts,
+    login,
+)
 from live.storage import Storage
 
 SESSION_FILE = LOGS_DIR / "cpgw_session.json"
@@ -100,7 +106,7 @@ class Keeper:
     def start(self) -> None:
         banner = (
             f"CPGW KEEPER · paper={self.creds.is_paper} · port={self.cpgw_port} · "
-            f"user={self.creds.username!r}"
+            f"user={self.creds.username!r} · auth={AUTH_BACKEND}"
         )
         self.storage.log_event("info", "cpgw_keeper", f"starting | {banner}")
         print(banner)
