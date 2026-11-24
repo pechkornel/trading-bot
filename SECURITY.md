@@ -20,6 +20,10 @@
   (`DASHBOARD_HOST`, default `127.0.0.1`). The gateway port 5000 is published on `127.0.0.1`
   only. Docker bypasses host firewalls for published ports, so the bind address is the
   control, not a firewall rule. Do not change either to `0.0.0.0` or `5000:5000`.
+  With the systemd units (not Docker), never leave `DASHBOARD_HOST` empty in `.env`: systemd
+  then passes an empty host and uvicorn listens on all interfaces. Set it to `127.0.0.1` or
+  remove the line. Docker needs Engine 28 or later, because older engines let hosts on the
+  same LAN reach ports published on `127.0.0.1`.
 - **Remote access.** Use `sudo tailscale serve --bg 8765` for tailnet-only HTTPS. Never run
   `tailscale funnel`, which publishes the dashboard to the internet. `tailscale funnel status`
   must show nothing.
