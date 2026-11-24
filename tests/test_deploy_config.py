@@ -1,5 +1,6 @@
 """Offline checks of the deploy files. They pin the safety properties."""
 
+import ipaddress
 import re
 from fnmatch import fnmatch
 from pathlib import Path
@@ -93,7 +94,7 @@ def test_gateway_is_locked_down():
     gateway = _gateway()
     assert "ALL" in gateway["cap_drop"]
     assert "no-new-privileges:true" in gateway["security_opt"]
-    conf_mounts = [v for v in gateway["volumes"] if v.endswith("/root/conf.yaml:ro")]
+    conf_mounts = [v for v in gateway["volumes"] if v.endswith("/conf.template.yaml:ro")]
     assert len(conf_mounts) == 1
     assert conf_mounts[0].startswith("./docker/gateway/conf.yaml:")
 
@@ -123,7 +124,7 @@ def test_gateway_conf_listens_on_the_paper_port_with_ssl():
 
 def test_gateway_conf_allow_list_is_loopback_and_bridge_only():
     allow = _gateway_conf()["ips"]["allow"]
-    assert allow == ["127.0.0.1", "172.31.250.*"]
+    assert allow == ["127.0.0.1", "172.31.250.1"]
     for entry in allow:
         assert not str(entry).startswith("192.")
         assert entry != "*"
@@ -131,17 +132,82 @@ def test_gateway_conf_allow_list_is_loopback_and_bridge_only():
 
 
 def test_gateway_allow_pattern_matches_the_compose_subnet():
-    prefix = _subnet().split("/")[0].rsplit(".", 1)[0]
-    assert f"{prefix}.*" in _gateway_conf()["ips"]["allow"]
+    network = ipaddress.ip_network(_subnet())
+    bridge = [e for e in _gateway_conf()["ips"]["allow"] if e != "127.0.0.1"]
+    assert bridge == ["172.31.250.1"]
+    assert ipaddress.ip_address(bridge[0]) in network
 
 
-def test_gateway_dockerfile_pins_release_and_hash():
+def test_gateway_hash_file_matches_the_pinned_release():
+    text = _read("docker/gateway/gateway.sha256").strip()
+    assert text == f"{GATEWAY_SHA256}  ibkr-gateway-linux-amd64.zip"
+
+
+def test_gateway_dockerfile_copies_vendored_zip_and_verifies_it():
     text = _read("docker/gateway/Dockerfile")
     assert "GATEWAY_VERSION=v1.0.0" in text
     assert "GATEWAY_ASSET=ibkr-gateway-linux-amd64.zip" in text
-    assert GATEWAY_SHA256 in text
-    assert "sha256sum -c" in text
+    assert "curl -fsSL" not in text
+    assert "releases/download" not in text
+    assert "COPY --from=vendor" in text
+    assert "sha256sum -c gateway.sha256" in text
+    assert "rm -f" in text and "vertx.jks" in text
+    assert "openssl" in text
+    assert 'ENTRYPOINT ["./entrypoint.sh"]' in text
     assert any(line.startswith("USER ") for line in text.splitlines())
+
+
+def test_gateway_compose_build_uses_vendor_context():
+    build = _gateway()["build"]
+    assert build["context"] == "docker/gateway"
+    assert build["additional_contexts"] == {"vendor": "./vendor/ibkr-gateway"}
+
+
+def test_gateway_compose_mounts_secret_tmpfs_and_tls_volume():
+    gateway = _gateway()
+    assert gateway["secrets"] == ["gateway_ssl_password"]
+    assert any(t.startswith("/opt/ibkr-gateway/run:") for t in gateway["tmpfs"])
+    assert "ibkr_gateway_tls:/opt/ibkr-gateway/tls" in gateway["volumes"]
+    compose = _compose()
+    assert compose["secrets"]["gateway_ssl_password"]["file"] == "./secrets/gateway_ssl_password"
+    assert "ibkr_gateway_tls" in compose["volumes"]
+
+
+def test_gateway_conf_takes_ssl_password_from_a_placeholder():
+    assert _gateway_conf()["sslPwd"] == "__SSL_PWD__"
+    assert "mywebapi" not in _read("docker/gateway/conf.yaml")
+
+
+def test_fetch_script_is_strict_and_pinned():
+    text = _read("scripts/fetch_gateway.sh")
+    assert "set -euo pipefail" in text
+    assert "docker/gateway/gateway.sha256" in text
+    assert "vendor/ibkr-gateway" in text
+    assert "unzip" not in text
+    assert "ibkr-gateway-linux-amd64.zip" in text
+    assert "rm -f" in text
+
+
+def _entrypoint_code() -> str:
+    lines = _read("docker/gateway/entrypoint.sh").splitlines()
+    return "\n".join(ln for ln in lines if not ln.lstrip().startswith("#"))
+
+
+def test_entrypoint_never_leaks_the_password():
+    code = _entrypoint_code()
+    assert "set -eu" in code
+    assert "set -x" not in code and "xtrace" not in code
+    assert "-passin file:" in code and "-passout file:" in code
+    assert "-passin pass:" not in code and "-passout pass:" not in code
+    assert "[!0-9A-Za-z]" in code
+    assert not re.search(r"(echo|printf)[^\n]*\$\{?(PW|PASSWORD|SSL_PWD)", code)
+
+
+def test_entrypoint_certificate_covers_localhost_and_loopback_ip():
+    code = _entrypoint_code()
+    assert "subjectAltName=DNS:localhost,IP:127.0.0.1" in code
+    assert "extendedKeyUsage=serverAuth" in code
+    assert "rsa:3072" in code
 
 
 def _ignore_lines(rel: str) -> list[str]:

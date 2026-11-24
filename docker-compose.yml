@@ -103,6 +103,9 @@ services:
   ibkr_gateway:
     build:
       context: docker/gateway
+      # Run scripts/fetch_gateway.sh first: it puts the pinned zip here.
+      additional_contexts:
+        vendor: ./vendor/ibkr-gateway
     image: tradingbot-ibkr-gateway:v1.0.0
     container_name: tradingbot-ibkr-gateway
     profiles: ["gateway"]
@@ -110,8 +113,13 @@ services:
     networks: [ibkr_gateway]
     ports:
       - "127.0.0.1:5000:5000"   # loopback only, never "5000:5000"
+    secrets:
+      - gateway_ssl_password
+    tmpfs:
+      - /opt/ibkr-gateway/run:uid=10001,gid=10001,mode=0700,size=1m
     volumes:
-      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/root/conf.yaml:ro
+      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/conf.template.yaml:ro
+      - ibkr_gateway_tls:/opt/ibkr-gateway/tls
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
@@ -120,3 +128,10 @@ networks:
     ipam:
       config:
         - subnet: 172.31.250.0/24
+
+volumes:
+  ibkr_gateway_tls:
+
+secrets:
+  gateway_ssl_password:
+    file: ./secrets/gateway_ssl_password
