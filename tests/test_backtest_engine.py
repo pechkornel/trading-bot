@@ -223,6 +223,18 @@ def test_min_bars_for_live_config_is_253():
     assert min_bars_for(CoreSleeveConfig()) == 253
 
 
+def test_empty_target_dict_goes_to_cash():
+    _, adj = make_frames({"A": [0, 0.10, 0.10, 0.10, 0.10, 0.10]})
+    cal = adj.index
+    res = simulate(adj, cal, scripted({0: {"A": 1.0}, 2: {}}, cal), BPS5)
+    assert len(res.fills) == 2
+    assert res.fills[1] == (cal[3], {})
+    assert res.weights["A"].iloc[2] == pytest.approx(1.0)
+    assert (res.weights.iloc[3:] == 0.0).all().all()
+    assert res.equity.iloc[4] == res.equity.iloc[3]
+    assert res.equity.iloc[5] == res.equity.iloc[3]
+
+
 def test_min_bars_for_takes_the_largest_requirement():
     cfg = CoreSleeveConfig(momentum_lookback_days=10, trend_ma_days=30, risk_off_spy_ma_days=5)
     assert min_bars_for(cfg) == 30
