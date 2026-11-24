@@ -403,3 +403,28 @@ def test_successful_refresh_replaces_every_file(tmp_path):
     assert json.loads(after["manifest.json"])["tickers"]["SPY"]["rows"] == 5
     assert md.raw_close["SPY"].iloc[0] == 900.0
     assert [p.name for p in tmp_path.iterdir()] == ["cache"]
+
+
+@pytest.mark.parametrize("name", ["..", ".", "a\\b", "../x", "a/b", ".hidden", "", "a b"])
+def test_unsafe_cache_names_are_rejected(name):
+    with pytest.raises(DataError, match="unsafe"):
+        bd._safe(name)
+
+
+def test_safe_names_map_as_before():
+    assert bd._safe("^VIX") == "_VIX"
+    assert bd._safe("DX-Y.NYB") == "DX-Y.NYB"
+    assert bd._safe("T10Y2Y") == "T10Y2Y"
+
+
+def test_unsafe_ticker_never_touches_the_cache(tmp_path):
+    cache = tmp_path / "cache"
+    with pytest.raises(DataError, match="unsafe"):
+        load_market_data(
+            ["../evil"],
+            [],
+            cache,
+            fetch_yahoo=Fakes().fetch_yahoo,
+            fetch_fred=Fakes().fetch_fred,
+        )
+    assert [p.name for p in tmp_path.iterdir()] == []

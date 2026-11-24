@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -126,8 +127,14 @@ def drop_unsettled_today(
     return df[~drop], [d.strftime("%Y-%m-%d") for d in dates[drop]]
 
 
+_SAFE_NAME = re.compile(r"[A-Za-z0-9._^=-]+")
+
+
 def _safe(name: str) -> str:
-    return name.replace("^", "_").replace("/", "_")
+    """Cache file stem for a ticker or series id. Rejects anything that could leave the cache."""
+    if not _SAFE_NAME.fullmatch(name) or name.startswith("."):
+        raise DataError(f"unsafe cache name: {name!r}")
+    return name.replace("^", "_")
 
 
 def _naive_dates(index: pd.Index) -> pd.DatetimeIndex:
