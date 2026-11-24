@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import io
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -261,26 +262,33 @@ def main(
         print("Nothing was written.")
         return 1
 
-    out = Path(args.out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    chart = False
+    # Render everything in memory first, so a rendering error writes no file at all.
+    png: bytes | None = None
     try:
         drawdowns = {k: v / v.cummax() - 1.0 for k, v in curves.items()}
         labels = {**report.BENCHMARK_LABELS, "Strategy": "Strategy (core sleeve)"}
+        buf = io.BytesIO()
         report.plot_equity(
             {labels.get(k, k): v for k, v in curves.items()},
             {labels.get(k, k): v for k, v in drawdowns.items()},
-            out / "equity_curve.png",
+            buf,
         )
-        chart = True
+        png = buf.getvalue()
     except ImportError:
         print(
             "matplotlib is not installed: skipping equity_curve.png "
             "(uv pip install -r requirements-backtest.txt)"
         )
-    report.write_json(results, out / "results.json")
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    report.write_markdown(results, out / "results.md", stamp, chart=chart)
+    json_out = report.json_text(results)
+    md_out = report.markdown_text(results, stamp, chart=png is not None)
+
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    if png is not None:
+        (out / "equity_curve.png").write_bytes(png)
+    (out / "results.json").write_text(json_out)
+    (out / "results.md").write_text(md_out)
     print(f"Wrote results to {out}")
     return 0
 

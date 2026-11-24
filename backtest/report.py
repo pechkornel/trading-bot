@@ -101,9 +101,12 @@ def _clean(value, places: int = 6):
     return value
 
 
+def json_text(results: dict) -> str:
+    return json.dumps(_clean(results), indent=2, sort_keys=True, allow_nan=False) + "\n"
+
+
 def write_json(results: dict, path: str | Path) -> None:
-    text = json.dumps(_clean(results), indent=2, sort_keys=True, allow_nan=False) + "\n"
-    Path(path).write_text(text)
+    Path(path).write_text(json_text(results))
 
 
 def _pct(x, places: int = 2) -> str:
@@ -349,12 +352,19 @@ def render_markdown(results: dict, generated_at: str, chart: bool = False) -> st
     return "\n".join(out)
 
 
+def markdown_text(results: dict, generated_at: str, chart: bool = False) -> str:
+    return render_markdown(_clean(results), generated_at, chart) + "\n"
+
+
 def write_markdown(results: dict, path: str | Path, generated_at: str, chart: bool = False) -> None:
-    Path(path).write_text(render_markdown(_clean(results), generated_at, chart) + "\n")
+    Path(path).write_text(markdown_text(results, generated_at, chart))
 
 
-def plot_equity(curves: dict, drawdowns: dict, path: str | Path) -> None:
-    """Top panel: log equity. Bottom panel: drawdowns. Needs matplotlib (lazy import)."""
+def plot_equity(curves: dict, drawdowns: dict, path) -> None:
+    """Top panel: log equity. Bottom panel: drawdowns. Needs matplotlib (lazy import).
+
+    `path` is a file path or a binary file-like object (anything `savefig` accepts).
+    """
     import matplotlib
 
     matplotlib.use("Agg")

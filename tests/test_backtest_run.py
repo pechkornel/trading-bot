@@ -232,6 +232,36 @@ def test_main_returns_1_and_writes_nothing_on_data_error(tmp_path, capsys):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_render_error_writes_nothing(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(brun.report, "render_markdown", boom)
+    out = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="render failed"):
+        brun.main(
+            ["--out-dir", str(out), "--cache-dir", str(tmp_path / "c")],
+            loader=lambda *a, **k: synth_data(),
+            core_cfg=small_cfg(),
+        )
+    assert not out.exists()
+
+
+def test_json_error_writes_nothing(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise ValueError("bad json")
+
+    monkeypatch.setattr(brun.report, "json_text", boom)
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="bad json"):
+        brun.main(
+            ["--out-dir", str(out), "--cache-dir", str(tmp_path / "c")],
+            loader=lambda *a, **k: synth_data(),
+            core_cfg=small_cfg(),
+        )
+    assert not out.exists()
+
+
 def test_main_returns_1_and_writes_nothing_when_start_date_fails(tmp_path):
     out = tmp_path / "out"
     code = brun.main(
