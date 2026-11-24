@@ -10,17 +10,22 @@ The bot is paper-trading only. Orders are sent only when a runner is started wit
 
 ## 1. Portfolio split
 
-Total equity is the paper account's net liquidation value, read from the Client Portal Gateway once per cycle (`live/account_equity.py`). When that value is missing or invalid, total equity is `portfolio.starting_equity` (100,000). Each sleeve gets `total equity * allocation_pct`. The figures below use 100,000.
+Total equity is the paper account's net liquidation value, read from the Client Portal Gateway once per cycle (`live/account_equity.py`). When that value is missing or invalid, total equity is the last accepted gateway reading if it is recent, and otherwise `portfolio.starting_equity` (100,000). Each sleeve gets `total equity * allocation_pct`. The figures below use 100,000.
 
-The gateway value is rejected, and `starting_equity` is used, when:
+The gateway value is rejected when:
 
-- `portfolio.use_account_equity` is false.
+- `portfolio.use_account_equity` is false. Then `starting_equity` is always used.
 - The gateway does not answer, is not logged in, or the summary has no usable `netliquidation` amount.
 - The value is not finite or not positive.
 - The currency is present and differs from `portfolio.equity_currency` (USD). A missing currency is accepted.
-- The value is outside `equity_min_ratio` to `equity_max_ratio` times `starting_equity` (0.25x to 4x, bounds inclusive, so 25,000 to 400,000). A fresh paper account of 1,000,000 is rejected for this reason.
+- The value is outside `equity_min_ratio` to `equity_max_ratio` times `starting_equity` (0.25x to 2x, bounds inclusive, so 25,000 to 200,000). A fresh paper account of 1,000,000 is rejected for this reason.
+- The value differs by more than `equity_max_step` (0.25, that is 25%) from the last accepted gateway reading, when that reading is younger than `equity_last_max_age_sec`. The first reading ever, or one after the last reading has aged out, is only range checked.
 
-Dry runs read the account value too. Each cycle writes one `portfolio` event that says which value was used, for example `equity: net liquidation 123,456.78 USD (gateway)` or `equity: starting_equity 100,000.00 (fallback: <reason>)`. A fallback is logged at `warn` level, except the deliberate `use_account_equity: false`, which is `info`. Gateway readings are also written to the `equity` table (shown at `/api/equity`). Fallbacks are not.
+When the gateway value is rejected (except for `use_account_equity: false`), the cycle uses the last accepted gateway reading from the `equity` table if it is younger than `equity_last_max_age_sec` (86400, one day). Only when there is no such reading does it use `starting_equity`. This stops one failed read from resizing the sleeves and triggering a drift rebalance. The reused value is not written to the `equity` table again.
+
+Dry runs read the account value too. Each cycle writes one `portfolio` event that says which value was used, for example `equity: net liquidation 123,456.78 USD (gateway)`, `equity: last net liquidation 60,000.00 (fallback: <reason>, from <timestamp>)` or `equity: starting_equity 100,000.00 (fallback: <reason>)`. Anything other than a fresh gateway reading is logged at `warn` level, except the deliberate `use_account_equity: false`, which is `info`. Gateway readings are also written to the `equity` table (shown at `/api/equity`). Fallbacks are not.
+
+The `portfolio` equity keys are checked when the config loads: `use_account_equity` must be a YAML boolean (a quoted `"false"` is an error), the numeric keys must be numbers, and `equity_currency` must be a 3 letter code (stored in upper case).
 
 | Sleeve | Key | Enabled | Allocation | Budget |
 |---|---|---|---|---|
@@ -31,7 +36,7 @@ Dry runs read the account value too. Each cycle writes one `portfolio` event tha
 The remaining 10% (10,000) is never traded.
 
 ```
-Total equity  100,000  (net liquidation, else starting_equity)
+Total equity  100,000  (net liquidation, else last reading, else starting_equity)
 |
 +-- core       70%  70,000  macro + trend + momentum, weekly or on drift
 +-- sentiment  20%  20,000  news sentiment longs, short holds
@@ -336,9 +341,11 @@ Most settings are in `config/symbols.yaml`.
 |---|---|
 | Move money between sleeves | `sleeves.core.allocation_pct`, `sleeves.sentiment.allocation_pct`, `sleeves.tactical.allocation_pct` |
 | Change the fallback budget and the anchor of the range check | `portfolio.starting_equity` |
-| Size from a 1,000,000 paper account | Set `portfolio.starting_equity: 1000000` (otherwise 1,000,000 is more than 4x the default and is rejected) |
+| Size from a 1,000,000 paper account | Set `portfolio.starting_equity: 1000000` (otherwise 1,000,000 is more than 2x the default and is rejected) |
 | Turn account equity sizing off | `portfolio.use_account_equity: false` (always use `starting_equity`) |
-| Change the accepted account value range | `portfolio.equity_min_ratio` (0.25), `portfolio.equity_max_ratio` (4.0), as multiples of `starting_equity` |
+| Change the accepted account value range | `portfolio.equity_min_ratio` (0.25), `portfolio.equity_max_ratio` (2.0), as multiples of `starting_equity` |
+| Change the largest accepted change between two readings | `portfolio.equity_max_step` (0.25) |
+| Change how long the last reading can be reused after a failed read | `portfolio.equity_last_max_age_sec` (86400) |
 | Change the expected account currency | `portfolio.equity_currency` (USD) |
 | Change cycle frequency | `portfolio.cycle_interval_sec` |
 | Change the core universe | `sleeves.core.universe`. Each symbol needs a `universe.<symbol>:` block and a bucket in `ASSET_BUCKET` in `core/scoring.py`. |

@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format follows
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
 - Offline test suite (428 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - Account equity sizing: each cycle reads the paper account's net liquidation from the gateway and logs one `equity:` event that says which value was used. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio` and `equity_currency` (#20).
+- Account equity sizing: each cycle sizes the sleeves from the paper account's net liquidation and logs one `equity:` event. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio`, `equity_max_step`, `equity_last_max_age_sec` and `equity_currency` (#20).
 - The control page shows the last net liquidation next to the starting equity (#20).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI (#4).
@@ -35,6 +36,7 @@ All notable changes to this project are documented here. The format follows
 - On early-close days (13:00 ET) `OPEN` ends at the real close and after-close logic starts there (#15).
 - The satellite hold timer exit reason is now `hold timer: 10 trading days >= 10 max` (was `hold timer: 10d >= 10d max`). Anything that matches the old string in `targets.reason` or the events log must be updated. Open positions exit later than before when a weekend or holiday falls in their hold period, including positions opened before the upgrade (#7).
 - Sleeve budgets follow the paper account value instead of the static `starting_equity`. Dry runs read it too. `starting_equity` is the fallback when the gateway does not answer. A balance outside 0.25x to 4x of `starting_equity` (for example a 1,000,000 paper account) is rejected and logged as a warning. Order sizes change on the next cycle if the account differs from `starting_equity`. Set `portfolio.use_account_equity: false` to restore the old behaviour (#20).
+- Sleeve budgets follow the paper account value within 0.25x to 2x of `starting_equity`. Steps over 25% and failed reads reuse the last reading, and `use_account_equity: false` restores the old behaviour (#20).
 - The core calendar trigger reason is now `calendar: Fri` instead of `calendar: Fri close`, because it fires on the first Friday cycle in Eastern time, not at the close (#5). Anything that matches the old string in `targets.reason` or the events log must be updated.
 - The `PortfolioConfig.reentry_cooldown_sec` default is now 86400 (was 600), matching `config/symbols.yaml` (#6).
 - The codebase is formatted with ruff. Imports are sorted and unused imports are removed (#4).
