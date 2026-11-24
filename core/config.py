@@ -100,6 +100,32 @@ class PortfolioConfig:
     equity_last_max_age_sec: int = 86400
 
     def __post_init__(self) -> None:
+        if not isinstance(self.use_account_equity, bool):
+            raise ValueError(
+                "portfolio.use_account_equity must be true or false (a YAML boolean, not a "
+                f"string), got {self.use_account_equity!r}"
+            )
+        for key in (
+            "starting_equity",
+            "equity_min_ratio",
+            "equity_max_ratio",
+            "equity_max_step",
+            "equity_last_max_age_sec",
+        ):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"portfolio.{key} must be a number, got {value!r}")
+        currency = self.equity_currency
+        if not (
+            isinstance(currency, str)
+            and len(currency) == 3
+            and currency.isascii()
+            and currency.isalpha()
+        ):
+            raise ValueError(
+                f"portfolio.equity_currency must be a 3-letter currency code, got {currency!r}"
+            )
+        self.equity_currency = currency.upper()
         if not self.starting_equity > 0:
             raise ValueError(f"starting_equity must be > 0, got {self.starting_equity}")
         if not (0 < self.equity_min_ratio <= 1 <= self.equity_max_ratio):

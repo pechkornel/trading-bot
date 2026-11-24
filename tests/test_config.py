@@ -144,3 +144,53 @@ def test_load_portfolio_without_account_equity_keys_uses_defaults(monkeypatch):
 def test_portfolio_config_rejects_bad_equity_settings(kwargs):
     with pytest.raises(ValueError):
         PortfolioConfig(**kwargs)
+
+
+@pytest.mark.parametrize("value", ["false", "true", "False", 0, 1, None])
+def test_use_account_equity_must_be_a_real_bool(value):
+    with pytest.raises(ValueError, match="use_account_equity"):
+        PortfolioConfig(use_account_equity=value)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "starting_equity",
+        "equity_min_ratio",
+        "equity_max_ratio",
+        "equity_max_step",
+        "equity_last_max_age_sec",
+    ],
+)
+@pytest.mark.parametrize("value", ["1", "abc", True, None, [1]])
+def test_numeric_equity_keys_reject_non_numbers(key, value):
+    with pytest.raises(ValueError, match=key):
+        PortfolioConfig(**{key: value})
+
+
+def test_numeric_equity_keys_accept_int_and_float():
+    cfg = PortfolioConfig(
+        starting_equity=50_000,
+        equity_min_ratio=1,
+        equity_max_ratio=3,
+        equity_max_step=1,
+        equity_last_max_age_sec=3600.0,
+    )
+    assert cfg.starting_equity == 50_000
+
+
+@pytest.mark.parametrize("value", ["", "US", "USDX", "U1D", 840, None, " "])
+def test_equity_currency_must_be_three_letters(value):
+    with pytest.raises(ValueError, match="equity_currency"):
+        PortfolioConfig(equity_currency=value)
+
+
+def test_equity_currency_is_normalised_to_upper_case():
+    assert PortfolioConfig(equity_currency="eur").equity_currency == "EUR"
+
+
+def test_load_portfolio_with_quoted_false_raises(monkeypatch):
+    raw = {"portfolio": {"use_account_equity": "false"}}
+    monkeypatch.setattr("core.config._load_yaml", lambda path: raw)
+    with pytest.raises(ValueError, match="use_account_equity"):
+        load_portfolio()
