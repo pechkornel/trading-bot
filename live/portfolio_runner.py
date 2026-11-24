@@ -76,6 +76,7 @@ from live.account_equity import (
     format_equity_event,
     resolve_total_equity,
 )
+from live.account_guard import require_paper_account_for_live
 from live.cpgw_keeper import read_session
 from live.storage import Storage
 from live.telegram_notifier import TelegramConfig, TelegramNotifier
@@ -196,6 +197,7 @@ class PortfolioRunner:
                 "No CPGW session. Start `live.cpgw_keeper` first so the SRP login "
                 "runs and writes logs/cpgw_session.json."
             )
+        require_paper_account_for_live(session.get("account_id"), dry_run=self.dry_run)
         self._cookie = str(session.get("cookie") or "")
         self._session_stamp = session.get("updated_at")
         self.client = CPGWClient(cookie=self._cookie, port=self.app_cfg.ib.port)

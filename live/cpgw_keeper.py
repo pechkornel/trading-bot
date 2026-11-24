@@ -426,8 +426,9 @@ class Keeper:
     def _on_paper_check_unsure(self) -> None:
         """No account list after the retries: the session is kept, nothing is locked.
 
-        The check runs again on a later tick. Orders stay fail-closed because the
-        portfolio runner has its own paper lock."""
+        The check runs again on a later tick. Orders are limited by the runners: with
+        --live they refuse to start unless the session file's account id has the paper
+        prefix (live/account_guard.py), and a dry run sends no orders."""
         if not self._paper_unsure:
             self._paper_unsure = True
             self._event("warn", "paper check inconclusive: no account list; will retry")

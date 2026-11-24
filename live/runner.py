@@ -30,6 +30,7 @@ from core.config import SymbolConfig, assert_paper_mode, load_app_config, load_s
 from core.cpgw_client import CPGWClient, NotAuthenticatedError
 from core.features import get_features
 from core.indicators import calculate_indicators, capitalize_columns
+from live.account_guard import require_paper_account_for_live
 from live.cpgw_keeper import read_session
 from live.notifier import format_trade_alert, send_email
 from live.storage import Storage
@@ -92,7 +93,9 @@ class Runner:
         print("=" * len(banner))
         print(banner)
         print("=" * len(banner))
-        self.client = _client_from_session(self.app_cfg.ib.port)
+        client = _client_from_session(self.app_cfg.ib.port)
+        require_paper_account_for_live(client.account_id, dry_run=self.dry_run)
+        self.client = client
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
