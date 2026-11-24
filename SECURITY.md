@@ -138,8 +138,10 @@
   be empty, because the gateway holds the session itself) and is included in the nightly
   backup. Protect the backup directory.
 - **Dashboard-spawned workers.** The dashboard can start workers inside its own container.
-  That container has no `CPGW_CA_FILE`, no login secret and no Chromium, so a keeper started
-  there cannot log in and a runner started there does not verify the gateway certificate. Run
+  That container gets `CPGW_CA_FILE` from `.env` but does not mount the `ibkr_gateway_tls`
+  volume, and it has no login secret and no Chromium. A keeper started there cannot log in,
+  and a runner started there raises `CPGWError` at start because the certificate file is
+  missing (it fails closed, it never skips verification). Run
   the workers as compose services. This is a known limit, not changed in Phase 1.
 - **Sentiment satellite.** It is off (`status: research`, 0% allocation) and the `sentiment`
   compose service is in profile `research`. No simulated positions are managed.

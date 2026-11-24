@@ -689,7 +689,7 @@ Use the folder date and commit hash from step 1. The old code ignores `secrets/`
 
 ### Known limits
 
-- The dashboard can start the keeper, the runners and the sentiment worker as subprocesses inside its own container. That container has no `CPGW_CA_FILE`, no login secret and no Chromium. A keeper started there cannot log in, and a runner started there does not verify the gateway certificate. Run the workers as compose services. Do not rely on the dashboard control page for the keeper.
+- The dashboard can start the keeper, the runners and the sentiment worker as subprocesses inside its own container. That container reads `CPGW_CA_FILE` from `.env` like every service, but it does not mount the `ibkr_gateway_tls` volume, so the certificate file does not exist there. It also has no login secret and no Chromium. A keeper started there cannot log in, and a runner started there raises `CPGWError` at start because it cannot load the certificate (it fails closed, it does not skip verification). Run the workers as compose services. Do not rely on the dashboard control page for the keeper.
 - Two keepers (one from the dashboard, one from the container) are not supported. The lockout file blocks both, but they would still compete for the session.
 - The Telegram token in `.env` is visible to every container. A token-file variant is a follow-up.
 - The Chromium sandbox is off. It is set explicitly in `core/gateway_login.py` (`chromium_sandbox=False`), because Docker blocks the user namespaces it needs. The browser only opens the local gateway address, and every other address is blocked.

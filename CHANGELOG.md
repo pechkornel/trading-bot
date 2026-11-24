@@ -49,7 +49,7 @@ All notable changes to this project are documented here. The format follows
 - `IbkrCredentials` hides the password in `repr`. The keeper banner shows only the first two characters of the username.
 - `.env.example` no longer has `IBKR_USERNAME` or `IBKR_PASSWORD`. It adds `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `IBKR_LOGIN_SECRET_FILE` and `CPGW_CA_FILE`.
 - **Upgrade note:** move `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` into `secrets/ibkr_login` (chmod 600, owner uid 1000), create `secrets/gateway_ssl_password`, run `scripts/fetch_gateway.sh`, and replace `core/ibkr_auth_private.py` with `deploy/ibkr_auth_private.py.example`. Follow `deploy/README.md` section 0B.
-- Known limit: workers started from the dashboard run inside the dashboard container, which has no certificate file, no login secret and no Chromium. Run the keeper as a compose service.
+- Known limit: workers started from the dashboard run inside the dashboard container, which reads `CPGW_CA_FILE` from `.env` but does not mount the gateway certificate volume, and has no login secret and no Chromium. A runner started there fails closed with `CPGWError` at start. Run the keeper and the runners as compose services.
 - The Docker guide in `deploy/README.md` requires Docker Engine 28 or later.
 - `DASHBOARD_HOST` defaults to `127.0.0.1`, so the dashboard is no longer reachable on the tailnet IP directly.
   **Upgrade note:** run `sudo tailscale serve --bg 8765` and open the `https://<machine>.<tailnet>.ts.net` URL instead.
