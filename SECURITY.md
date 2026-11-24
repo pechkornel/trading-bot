@@ -15,7 +15,8 @@
   symlink, not a regular file, larger than 4 KiB, readable by group or other, or owned by
   another uid than the reader. The keeper container runs as uid 1000, so the host file must
   be `1000:1000` and mode 600. Error messages name the file, line and key, never a value.
-  The keeper refuses to start while `IBKR_PASSWORD` is set in its environment.
+  The keeper refuses to start while `IBKR_PASSWORD` is set in its environment or in `.env`.
+  It checks after `.env` is read.
 - **Broker login.** The keeper logs in headlessly through the gateway's own login page
   (`core/gateway_login.py`, tracked and tested). The git-ignored `core/ibkr_auth_private.py`
   is only wiring (template: `deploy/ibkr_auth_private.py.example`) and holds no secret.
@@ -55,22 +56,33 @@
 - **Lockout.** The keeper never logs in while the gateway reports an authenticated session or
   is down, and not inside the nightly gap or the Saturday maintenance window. Unexpected drops
   retry with backoff (60 s up to 30 minutes). A wrong password, a second-factor prompt, an
-  unknown login page state or a non-paper account locks it out at once. Three failed
-  attempts in 24 hours lock it out too, and so do six submitted logins in 24 hours even when
-  each one worked (`keeper.max_logins_per_window`), which catches a session that drops right
-  after every login. A session shorter than 10 minutes (`keeper.min_session_sec`) makes the
-  next drop back off. Right before any submit the keeper also asks the gateway with no
-  cookie, so a lost session file cannot hide a live session, and an unclear answer means it
-  waits. The lockout is saved in `logs/keeper_state.json`
-  (mode 600, no secret), so a restart cannot bypass it, and a corrupt state file counts as
-  locked out. It clears only with `python -m live.cpgw_keeper --reset-lockout`.
+  unknown login page state, a non-paper account or a login setup error locks it out at once.
+  A setup error (a missing or invalid CA file, a gateway URL that is not local, or Playwright
+  not installed) is refused before any form is submitted. Its lockout reason starts with
+  `setup:`. Three submitted logins in 24 hours with no good login in between lock it out too,
+  and so do six submitted logins in 24 hours even when each one worked
+  (`keeper.max_logins_per_window`), which catches a session that drops right after every login.
+  A session shorter than 10 minutes (`keeper.min_session_sec`) makes the next drop back off.
+  Right before any submit the keeper checks the gateway a second time with no cookie, so a
+  lost session file cannot hide a live session. Only an explicit 401 or `authenticated: false`
+  allows the login. Any other answer (a network error, a 5xx or an unexpected body) means no
+  login. The keeper waits, and after 5 such checks in a row it logs one error and sends one
+  alert. The lockout is saved in `logs/keeper_state.json` (mode 600, no secret), so a restart
+  cannot bypass it, and a corrupt state file counts as locked out. It clears only with
+  `python -m live.cpgw_keeper --reset-lockout`.
 - **Paper account guard.** After every login, and when it adopts a running session, the keeper
-  lists the accounts. Every account id must start with `DU` (`keeper.paper_account_prefix`).
-  Otherwise it logs out, locks itself and alerts. This is a second check next to
-  `core.config.assert_paper_mode()`, which stays the first one.
+  lists the accounts. It asks up to 3 times, 2 s apart. Every account id must start with `DU`
+  (`keeper.paper_account_prefix`). An account id without that prefix means the keeper logs
+  out, locks itself and alerts. An empty or failed account list is not a lockout: the keeper
+  keeps the session, sends one warning alert at most once an hour, and checks again on later
+  ticks. This is a second check next to `core.config.assert_paper_mode()`, which stays the
+  first one.
 - **Telegram.** Alerts go through `api.telegram.org` with `TELEGRAM_BOT_TOKEN` and
   `TELEGRAM_CHAT_ID` from `.env`. Messages are plain text, redacted, truncated, deduplicated
-  and capped at 20 per hour per process. Only short summaries leave the server. The token is
+  and capped at 20 per hour per process. Each lockout alert has its own key (`lockout:<time>`),
+  so a later lockout is always sent. `--reset-lockout` clears the saved cooldowns of the
+  `lockout`, `not_paper` and `state_corrupt` keys, so the next alert of each kind goes out at
+  once. Only short summaries leave the server. The token is
   visible to every container because `.env` is. A token file variant is a follow-up. Treat the
   chat as a private channel and revoke the token with BotFather if it leaks.
 - **Private module in the Docker image.** The local images (`tradingbot:local`,

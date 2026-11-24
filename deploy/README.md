@@ -114,7 +114,7 @@ SENTIMENT_PROVIDER=stub
 
 - The IBKR login is not in `.env`. It goes in the file `secrets/ibkr_login` (step 4).
 - `CPGW_CA_FILE` is correct for the Docker gateway used in this section. With the host Java gateway, see "Java gateway: export its certificate once" in section 0.
-- Do not put `IBKR_USERNAME` or `IBKR_PASSWORD` in `.env`. The keeper refuses to start while `IBKR_PASSWORD` is set. The login goes in `secrets/ibkr_login` (step 4).
+- Do not put `IBKR_USERNAME` or `IBKR_PASSWORD` in `.env`. The keeper refuses to start while `IBKR_PASSWORD` is set in its environment or in `.env`. The login goes in `secrets/ibkr_login` (step 4).
 - `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`. The sentiment sleeve is off either way (allocation 0%).
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts (create the bot with BotFather on your phone). Fill the `EMAIL_*` values only if you use the single-symbol runner, which still sends Gmail.
 - `.env` is git-ignored. Never commit it. It is loaded into every container, so it holds no broker secret.
@@ -294,6 +294,9 @@ Run `git checkout main` later to leave the detached state.
 - Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt` or `requirements-login.txt`. Add it and rebuild.
 - The keeper refuses to start and mentions `IBKR_PASSWORD`: remove `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` (and from the environment of the container). The login is read from `secrets/ibkr_login` only.
 - The keeper is locked out: see section 0B step 15.
+- Keeper alert "the login setup is wrong": no login form was sent, so the IBKR account was not touched. Check `CPGW_CA_FILE` (the gateway certificate file), the gateway URL and that Playwright is installed. Then clear the lockout as in section 0B step 15.
+- Keeper alert "the gateway gave no clear login state": the keeper waits and does not log in. The gateway answered with something other than a clear 401 or `authenticated: false`, for example a network error or a 5xx. Server: `docker compose logs --tail 50 ibkr_gateway`. No reset is needed: the keeper goes on once the gateway answers clearly.
+- Keeper alert "cannot confirm that the session is a paper account": the gateway gave no account list after 3 tries. The session is kept, nothing is locked, and the keeper checks again. Only an account id without the `DU` prefix logs the keeper out and locks it.
 
 ---
 
@@ -306,7 +309,7 @@ Read this first:
 - You run every step by hand over SSH on the Ubuntu server. Several checks below can only be confirmed on your server. Each one says what to look for and gives a safe fallback. Every fallback fails closed: nothing is exposed and nothing trades.
 - Do not skip a check. If one fails and its fallback is not enough, stop, run the stop command from step 3, and report the last log lines.
 - Do the first login on a weekday, outside 00:45 to 01:30 New York time, and not on a Saturday. The keeper waits in those windows.
-- A failed login is counted. A wrong password, a second-factor prompt or an unknown login page state locks the keeper out at once. So do three submitted attempts in 24 hours. It never retries by itself after that (see step 15).
+- A failed login is counted. A wrong password, a second-factor prompt, an unknown login page state, a login setup error or a non-paper account locks the keeper out at once. Three submitted logins in 24 hours with no good login in between lock it out too. A lockout waits for you to reset it (see step 15). The login cap is the only lockout that ends by itself, when old logins leave the 24 hours.
 
 ### 1. Back up first (server)
 
@@ -578,7 +581,7 @@ Check 10 is part of this step.
 docker compose --profile gateway --profile auto run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --once 2>&1 | tee /tmp/keeper_first_login.txt
 ```
 
-Look for: a banner with `auth=private`, a masked username and `paper=True`, then `login OK, account=DU...` (a paper account id starts with `DU`). Telegram shows "login OK, session restored".
+Look for: a banner with `auth=private`, a masked username and `paper=True`, then the line `login OK, account=***NN`. The account id is masked to its last two digits, so the `DU` prefix does not show. The keeper itself logs out and locks out when an account id does not start with `DU`. Telegram shows "login OK, session restored".
 
 Then the leak check. It counts the lines that contain your password in the keeper output, the event log and the keeper state. Process substitution keeps the password out of the command line and the shell history.
 
@@ -599,6 +602,8 @@ python3 -c "import json; print(bool(json.load(open('logs/cpgw_session.json'))['c
 Either answer is fine. `False` means an empty cookie and a working login. If the keeper says `login finished but the gateway is not authenticated`, or fails after the form was submitted, that is a counted failed attempt. Read step 15 before you try again, and do not run the first login in a loop.
 
 If the keeper fails with `needs a manual step`, the selectors or markers do not match: go back to step 12. The keeper is then locked out and needs `--reset-lockout` (step 15).
+
+If the keeper logs `paper check inconclusive`, the gateway gave no account list. That is not a lockout. The session is kept, the keeper checks again on later ticks, and it alerts at most once an hour. Wait for the next check before you act. If it reports `login setup is wrong`, nothing was submitted to IBKR: fix the setup named in the alert, then reset (step 15).
 
 ### 14. Start the stack and check it (server)
 
@@ -622,7 +627,7 @@ Look for: no service above about 80% of its limit, and no `oom` lines. An out-of
 
 ### 15. Lockout: read it and reset it (server)
 
-Check 14. The keeper stops logging in, and keeps tickling, after a wrong password, a second-factor prompt, an unknown login page state, a non-paper account, three failed attempts in 24 hours, or six submitted logins in 24 hours even when each worked (`keeper.max_logins_per_window`, a sign that the session keeps dropping). A session that lasted under 10 minutes (`keeper.min_session_sec`) also makes the next drop back off. It sends a Telegram alert that says what is needed. The lockout is saved in `logs/keeper_state.json`, so a container restart does not clear it.
+Check 14. The keeper stops logging in, and keeps tickling, after a wrong password, a second-factor prompt, an unknown login page state, a login setup error (a CA file, gateway URL or Playwright problem, refused before any form is sent), a non-paper account, three submitted logins in 24 hours with no good login in between, or six submitted logins in 24 hours even when each worked (`keeper.max_logins_per_window`, a sign that the session keeps dropping). A session that lasted under 10 minutes (`keeper.min_session_sec`) also makes the next drop back off. It sends one Telegram alert that says what is needed, and repeats it once a day while the lockout lasts. The lockout is saved in `logs/keeper_state.json`, so a container restart does not clear it.
 
 Read the state:
 
@@ -631,16 +636,16 @@ python3 -m json.tool logs/keeper_state.json
 docker compose logs --tail 50 cpgw_keeper
 ```
 
-Look for: `locked_out_reason` (`null` means not locked out; the login cap shows only in the keeper logs and the alert, and ends by itself when old logins roll out of the 24 hours), `failed_attempts` and `submit_times` (timestamps of submitted attempts), `consecutive_failures`, `last_login_at` and `authenticated_since`. The file holds no secret. A corrupt state file also counts as locked out.
+Look for: `locked_out_reason` (`null` means not locked out. A setup error reads `setup: ...`. The login cap shows only in the keeper logs and the alert, and ends by itself when old logins roll out of the 24 hours), `failed_attempts` (submitted logins since the last good login), `submit_times` (every submitted login, kept across good logins and used for the login cap), `consecutive_failures`, `last_login_at` and `authenticated_since`. The file holds no secret. A corrupt state file also counts as locked out.
 
-Fix the cause first: the password in `secrets/ibkr_login`, the second factor on the IBKR account, the selectors from step 12, or the account itself. Then clear the lockout:
+Fix the cause first: the password in `secrets/ibkr_login`, the second factor on the IBKR account, the selectors from step 12, the account itself, or for a setup error the CA file (`CPGW_CA_FILE`), the gateway URL or Playwright. Then clear the lockout:
 
 ```bash
 docker compose run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --reset-lockout
 docker compose --profile auto restart cpgw_keeper
 ```
 
-The reset clears the reason, the failure counters and the submit times (so it also lifts the login cap) and keeps the session times. If the cause is not fixed, the next attempt fails and counts again. If a wrong password was the cause, fix it on IBKR's own web site before you reset, because repeated bad passwords can lock the IBKR account itself.
+The reset clears the reason, the failure counters and the submit times (so it also lifts the login cap) and keeps the session times. It also clears the saved alert cooldowns for the lockout, not-paper and corrupt-state alerts, so the next one of each kind is sent at once. If the cause is not fixed, the next attempt fails and counts again. If a wrong password was the cause, fix it on IBKR's own web site before you reset, because repeated bad passwords can lock the IBKR account itself.
 
 ### 16. Sentiment check (server)
 
@@ -678,7 +683,7 @@ Use the folder date and commit hash from step 1. The old code ignores `secrets/`
 - The dashboard can start the keeper, the runners and the sentiment worker as subprocesses inside its own container. That container has no `CPGW_CA_FILE`, no login secret and no Chromium. A keeper started there cannot log in, and a runner started there does not verify the gateway certificate. Run the workers as compose services. Do not rely on the dashboard control page for the keeper.
 - Two keepers (one from the dashboard, one from the container) are not supported. The lockout file blocks both, but they would still compete for the session.
 - The Telegram token in `.env` is visible to every container. A token-file variant is a follow-up.
-- The Chromium sandbox is off (Playwright's default `chromiumSandbox: false`), because Docker blocks the user namespaces it needs. The browser only opens the local gateway address, and every other address is blocked.
+- The Chromium sandbox is off. It is set explicitly in `core/gateway_login.py` (`chromium_sandbox=False`), because Docker blocks the user namespaces it needs. The browser only opens the local gateway address, and every other address is blocked.
 - `logs/cpgw_session.json` can hold a session cookie and is in the nightly backup. Protect the backup folder.
 
 ---

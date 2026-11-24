@@ -227,7 +227,7 @@ stat -c '%a %n' .env                         # expect: 600 .env
 
 ### IBKR login secret file
 
-The keeper logs in headlessly with a username and password. They are never in `.env` (the keeper refuses to start while `IBKR_PASSWORD` is set). They live in `secrets/ibkr_login`:
+The keeper logs in headlessly with a username and password. They are never in `.env` (the keeper refuses to start while `IBKR_PASSWORD` is set in its environment or in `.env`). They live in `secrets/ibkr_login`:
 
 ```bash
 cd /opt/trading-bot
@@ -267,7 +267,7 @@ docker compose --profile auto up -d --build
 
 # Watch logs while things spin up
 docker compose ps
-docker compose logs -f cpgw_keeper           # wait for "login OK - account=<id>"
+docker compose logs -f cpgw_keeper           # wait for "login OK, account=***NN" (the id is masked)
 ```
 
 Once the keeper says `login OK`, everything else lights up automatically:
