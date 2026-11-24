@@ -1,4 +1,5 @@
-"""NYSE calendar data pinned for 2026, read through core.market_hours.nyse_calendar."""
+"""core.market_hours: the NYSE calendar (2026 data pinned), US Eastern time, market
+regimes (including HOLIDAY and early closes) and trading_days_between."""
 
 from __future__ import annotations
 
@@ -62,6 +63,28 @@ def test_calendar_reaches_the_end_of_the_year_after_next():
 
 def test_calendar_is_built_once_per_year():
     assert nyse_calendar() is nyse_calendar()
+
+
+def test_calendar_window_moves_forward_after_new_year(monkeypatch):
+    # A long-running process must get a calendar that still reaches two years
+    # ahead after 1 January, not the one cached in the previous year.
+    import core.market_hours as mh
+
+    def frozen_at(moment: datetime):
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return moment
+
+        return FrozenDatetime
+
+    monkeypatch.setattr(mh, "datetime", frozen_at(datetime(2026, 12, 31, 23, tzinfo=timezone.utc)))
+    before = nyse_calendar().sessions[-1]
+    monkeypatch.setattr(mh, "datetime", frozen_at(datetime(2027, 1, 1, 1, tzinfo=timezone.utc)))
+    after = nyse_calendar().sessions[-1]
+
+    assert before.year == 2028
+    assert after.year == 2029
 
 
 # ---- to_eastern at the 2026 DST transitions ----
@@ -178,10 +201,6 @@ def test_holiday_gating_entries_off_exits_on():
 
 
 # ---- trading_days_between ----
-
-
-def _utc(*args) -> datetime:
-    return datetime(*args, tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize(

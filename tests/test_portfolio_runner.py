@@ -236,3 +236,21 @@ def test_satellite_cycle_opens_nothing_on_a_holiday(tmp_path):
     buys = [o for o in r.storage.recent_orders() if o["action"] == "BUY"]
     assert buys == []
     assert r.storage.get_holdings("sentiment") == []
+
+
+def test_cycle_labels_a_holiday_in_the_market_note(tmp_path, monkeypatch):
+    # With no sleeves enabled, _cycle logs its market note. On Thanksgiving it
+    # must say HOLIDAY, not fall through to AFTER-CLOSE.
+    freeze_runner_clock(monkeypatch, THANKSGIVING)
+    r = make_runner(tmp_path, ranked_closes())
+    r.core = None
+    r.satellite = None
+
+    r._cycle()
+
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        events = [row[0] for row in c.execute("SELECT message FROM events")]
+    notes = [m for m in events if "no sleeves enabled" in m]
+    assert len(notes) == 1
+    assert "HOLIDAY (next open in" in notes[0]
+    assert "AFTER-CLOSE" not in notes[0]
