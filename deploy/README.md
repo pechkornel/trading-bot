@@ -591,7 +591,7 @@ Look for: no service above about 80% of its limit, and no `oom` lines. An out-of
 
 ### 15. Lockout: read it and reset it (server)
 
-Check 14. The keeper stops logging in, and keeps tickling, after a wrong password, a second-factor prompt, an unknown login page state, a non-paper account, or three submitted attempts in 24 hours. It sends a Telegram alert that says what is needed. The lockout is saved in `logs/keeper_state.json`, so a container restart does not clear it.
+Check 14. The keeper stops logging in, and keeps tickling, after a wrong password, a second-factor prompt, an unknown login page state, a non-paper account, three failed attempts in 24 hours, or six submitted logins in 24 hours even when each worked (`keeper.max_logins_per_window`, a sign that the session keeps dropping). A session that lasted under 10 minutes (`keeper.min_session_sec`) also makes the next drop back off. It sends a Telegram alert that says what is needed. The lockout is saved in `logs/keeper_state.json`, so a container restart does not clear it.
 
 Read the state:
 
@@ -600,7 +600,7 @@ python3 -m json.tool logs/keeper_state.json
 docker compose logs --tail 50 cpgw_keeper
 ```
 
-Look for: `locked_out_reason` (`null` means not locked out), `failed_attempts` (timestamps of submitted attempts), `consecutive_failures`, `last_login_at` and `authenticated_since`. The file holds no secret. A corrupt state file also counts as locked out.
+Look for: `locked_out_reason` (`null` means not locked out; the login cap shows only in the keeper logs and the alert, and ends by itself when old logins roll out of the 24 hours), `failed_attempts` and `submit_times` (timestamps of submitted attempts), `consecutive_failures`, `last_login_at` and `authenticated_since`. The file holds no secret. A corrupt state file also counts as locked out.
 
 Fix the cause first: the password in `secrets/ibkr_login`, the second factor on the IBKR account, the selectors from step 12, or the account itself. Then clear the lockout:
 
@@ -609,7 +609,7 @@ docker compose run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --reset
 docker compose --profile auto restart cpgw_keeper
 ```
 
-The reset clears the reason and the failure counters and keeps the session times. If the cause is not fixed, the next attempt fails and counts again. If a wrong password was the cause, fix it on IBKR's own web site before you reset, because repeated bad passwords can lock the IBKR account itself.
+The reset clears the reason, the failure counters and the submit times (so it also lifts the login cap) and keeps the session times. If the cause is not fixed, the next attempt fails and counts again. If a wrong password was the cause, fix it on IBKR's own web site before you reset, because repeated bad passwords can lock the IBKR account itself.
 
 ### 16. Sentiment check (server)
 

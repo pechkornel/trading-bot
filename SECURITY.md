@@ -25,15 +25,17 @@
 - **Browser TLS.** The login uses headless Chromium (Playwright's headless shell, no X server).
   HTTPS checks are never turned off. The browser is started with
   `--ignore-certificate-errors-spki-list` for exactly one key, the gateway's own certificate
-  named by `CPGW_CA_FILE`. Without that file the login refuses to run. It only requests the
+  named by `CPGW_CA_FILE`. Without that file the login refuses to run. `CPGWClient` verifies
+  the same certificate, and refuses a gateway host that is not loopback when no
+  `CPGW_CA_FILE` is set (loopback keeps the unverified fallback). It only requests the
   local gateway address and aborts every other request. It records no video, trace or
   screenshot. The browser closes after each login. Whether this headless build honours the
   pin flag is confirmed on the server (`deploy/README.md` section 0B step 12). If it does
   not, navigation fails and nothing is sent.
 - **Chromium sandbox.** Playwright's default `chromiumSandbox: false` is kept, because the
   Chromium sandbox needs user namespaces that Docker blocks by default. The browser only
-  opens the local gateway address. The keeper container is not otherwise hardened, because it
-  holds the login secret and needs to launch a browser.
+  opens the local gateway address. The keeper container drops all capabilities and sets
+  `no-new-privileges`, and it holds the login secret.
 - **Redaction.** Every keeper event, every exception text that leaves the login code and every
   Telegram message goes through a redactor. It masks the password, the username, the Telegram
   token and `bot<id>:<token>` URL patterns, and cookie headers and pairs. Login error texts
@@ -43,8 +45,13 @@
 - **Lockout.** The keeper never logs in while the gateway reports an authenticated session or
   is down, and not inside the nightly gap or the Saturday maintenance window. Unexpected drops
   retry with backoff (60 s up to 30 minutes). A wrong password, a second-factor prompt, an
-  unknown login page state or a non-paper account locks it out at once. Three submitted
-  attempts in 24 hours lock it out too. The lockout is saved in `logs/keeper_state.json`
+  unknown login page state or a non-paper account locks it out at once. Three failed
+  attempts in 24 hours lock it out too, and so do six submitted logins in 24 hours even when
+  each one worked (`keeper.max_logins_per_window`), which catches a session that drops right
+  after every login. A session shorter than 10 minutes (`keeper.min_session_sec`) makes the
+  next drop back off. Right before any submit the keeper also asks the gateway with no
+  cookie, so a lost session file cannot hide a live session, and an unclear answer means it
+  waits. The lockout is saved in `logs/keeper_state.json`
   (mode 600, no secret), so a restart cannot bypass it, and a corrupt state file counts as
   locked out. It clears only with `python -m live.cpgw_keeper --reset-lockout`.
 - **Paper account guard.** After every login, and when it adopts a running session, the keeper
