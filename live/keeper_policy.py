@@ -32,6 +32,7 @@ from core.config import KeeperConfig
 FATAL_LOGIN_ERRORS = (BadCredentials, SecondFactorRequired, ManualStepRequired, NotPaperAccount)
 
 _MAX_TRACKED_ATTEMPTS = 50
+_MAX_TRACKED_SUBMITS = 200
 _END_OF_DAY = time(23, 59)
 
 
@@ -65,6 +66,9 @@ class KeeperState:
     last_alert_at: dict[str, datetime] = field(default_factory=dict)
     consecutive_failures: int = 0
     last_attempt_at: Optional[datetime] = None
+    # Every submit time. A successful login does not clear it, so the total cap holds
+    # even when each login works and the session then drops again.
+    submit_times: list[datetime] = field(default_factory=list)
 
 
 # ---- decision ----
@@ -112,6 +116,11 @@ def _recent_failures(state: KeeperState, now: datetime, cfg: KeeperConfig) -> in
     return sum(1 for ts in state.failed_attempts if ts > cutoff)
 
 
+def _recent_submits(state: KeeperState, now: datetime, cfg: KeeperConfig) -> int:
+    cutoff = now - timedelta(seconds=cfg.failed_login_window_sec)
+    return sum(1 for ts in state.submit_times if ts > cutoff)
+
+
 def decide(
     state: KeeperState, observation: Observation, now: datetime, cfg: KeeperConfig
 ) -> Action:
@@ -125,6 +134,15 @@ def decide(
         return Action(ActionKind.LOCKED_OUT, reason=state.locked_out_reason)
     if _recent_failures(state, now, cfg) >= cfg.max_failed_logins:
         return Action(ActionKind.LOCKED_OUT, reason="too_many_failed_logins")
+    if _recent_submits(state, now, cfg) >= cfg.max_logins_per_window:
+        return Action(
+            ActionKind.LOCKED_OUT,
+            reason=(
+                f"login cap reached: {cfg.max_logins_per_window} logins in "
+                f"{cfg.failed_login_window_sec // 3600} h, so the session keeps dropping. "
+                "Find out why, then wait or run --reset-lockout"
+            ),
+        )
 
     tz = ZoneInfo(cfg.timezone)
     local = now.astimezone(tz)
@@ -151,6 +169,8 @@ def record_submit(state: KeeperState, now: datetime) -> None:
     """Call before the login form is submitted, so a crash cannot hide the attempt."""
     state.failed_attempts.append(now)
     del state.failed_attempts[:-_MAX_TRACKED_ATTEMPTS]
+    state.submit_times.append(now)
+    del state.submit_times[:-_MAX_TRACKED_SUBMITS]
 
 
 def record_login_failure(
@@ -170,13 +190,27 @@ def record_login_failure(
         )
 
 
-def record_login_success(state: KeeperState, now: datetime) -> None:
+def record_login_success(
+    state: KeeperState, now: datetime, cfg: Optional[KeeperConfig] = None
+) -> None:
+    """Record a good login. `submit_times` is kept for the total cap.
+
+    When the session this login replaces lasted less than `min_session_sec`, the backoff
+    counter goes up instead of resetting, so a session that drops right after each login
+    waits 60, 120, 240 ... seconds between logins."""
+    cfg = cfg or KeeperConfig()
+    previous = state.authenticated_since
+    short = previous is not None and (now - previous).total_seconds() < cfg.min_session_sec
     state.last_login_at = now
     state.authenticated_since = now
     state.failed_attempts = []
-    state.consecutive_failures = 0
-    state.last_attempt_at = None
     state.locked_out_reason = None
+    if short:
+        state.consecutive_failures += 1
+        state.last_attempt_at = now
+    else:
+        state.consecutive_failures = 0
+        state.last_attempt_at = None
 
 
 def clear_lockout(state: KeeperState) -> KeeperState:
@@ -224,6 +258,7 @@ def _state_to_dict(state: KeeperState) -> dict:
         "last_alert_at": {k: v.isoformat() for k, v in state.last_alert_at.items()},
         "consecutive_failures": state.consecutive_failures,
         "last_attempt_at": _dt_out(state.last_attempt_at),
+        "submit_times": [ts.isoformat() for ts in state.submit_times],
     }
 
 
@@ -246,6 +281,15 @@ def _state_from_dict(data: object) -> KeeperState:
         if stamp is None:
             raise ValueError("bad failed_attempts entry")
         parsed_attempts.append(stamp)
+    submits = data.get("submit_times", [])
+    if not isinstance(submits, list):
+        raise ValueError("bad submit_times")
+    parsed_submits = []
+    for ts in submits:
+        stamp = _dt_in(ts)
+        if stamp is None:
+            raise ValueError("bad submit_times entry")
+        parsed_submits.append(stamp)
     parsed_alerts = {}
     for key, ts in alerts.items():
         stamp = _dt_in(ts)
@@ -260,6 +304,7 @@ def _state_from_dict(data: object) -> KeeperState:
         last_alert_at=parsed_alerts,
         consecutive_failures=failures,
         last_attempt_at=_dt_in(data.get("last_attempt_at")),
+        submit_times=parsed_submits,
     )
 
 

@@ -312,7 +312,7 @@ class Keeper:
         elif action.kind is ActionKind.WAIT:
             self._on_wait(action)
         elif action.kind is ActionKind.LOCKED_OUT:
-            self._on_locked_out(now)
+            self._on_locked_out(now, action)
         elif action.kind is ActionKind.LOGIN:
             self._on_login(action, now)
 
@@ -382,8 +382,8 @@ class Keeper:
         else:
             self._event("info", f"login backoff, next try at {until.isoformat()}")
 
-    def _on_locked_out(self, now: datetime) -> None:
-        reason = self.state.locked_out_reason or "too_many_failed_logins"
+    def _on_locked_out(self, now: datetime, action: policy.Action) -> None:
+        reason = self.state.locked_out_reason or action.reason or "too_many_failed_logins"
         if policy.should_alert(self.state, "lockout", now, LOCKOUT_REMINDER_SEC):
             self._send_lockout_alert(reason, now)
 
@@ -457,7 +457,7 @@ class Keeper:
             self._handle_login_failure(e, now)
             return
 
-        policy.record_login_success(self.state, now)
+        policy.record_login_success(self.state, now, self.cfg)
         self._session_verified = True
         self._last_wait = None
         self._save()

@@ -330,6 +330,10 @@ class KeeperConfig:
     failed_login_window_sec: int = 86400
     session_lost_alert_cooldown_sec: int = 3600
     paper_account_prefix: str = "DU"
+    max_logins_per_window: int = (
+        6  # all submitted logins per failed_login_window_sec, success or not
+    )
+    min_session_sec: int = 600  # a session shorter than this makes the next drop back off
 
     def __post_init__(self) -> None:
         for key in (
@@ -340,6 +344,8 @@ class KeeperConfig:
             "max_failed_logins",
             "failed_login_window_sec",
             "session_lost_alert_cooldown_sec",
+            "max_logins_per_window",
+            "min_session_sec",
         ):
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, int):
