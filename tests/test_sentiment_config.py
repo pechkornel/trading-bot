@@ -73,3 +73,46 @@ def test_loads_dotenv(yaml_provider, monkeypatch):
     monkeypatch.setattr("core.config.load_dotenv", lambda *a, **k: calls.append(a))
     config.load_sentiment_config()
     assert calls == [(config.ROOT / ".env",)]
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """No SENTIMENT_PROVIDER in the environment and no .env read."""
+    monkeypatch.delenv("SENTIMENT_PROVIDER", raising=False)
+    monkeypatch.setattr("core.config.load_dotenv", lambda *a, **k: None)
+
+
+def test_missing_yaml_defaults_to_stub(clean_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    assert config.load_sentiment_config().provider == "stub"
+
+
+def test_missing_yaml_still_applies_env(clean_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("SENTIMENT_PROVIDER", "alpha_vantage")
+    assert config.load_sentiment_config().provider == "alpha_vantage"
+
+
+def test_repo_config_without_env_uses_alpha_vantage(clean_env):
+    assert config.CONFIG_DIR == config.ROOT / "config"
+    assert config.load_sentiment_config().provider == "alpha_vantage"
+
+
+def test_env_stub_gives_stub_provider(clean_env, monkeypatch):
+    from core.sentiment import StubProvider, get_provider
+
+    monkeypatch.setenv("SENTIMENT_PROVIDER", "stub")
+    provider = get_provider(config.load_sentiment_config().provider)
+    assert isinstance(provider, StubProvider)
+    assert provider.name == "stub"
+
+
+def test_env_override_keeps_yaml_symbols(clean_env, monkeypatch, tmp_path):
+    (tmp_path / "symbols.yaml").write_text(
+        "sentiment_provider:\n  provider: alpha_vantage\n  symbols: [IWM, DIA]\n"
+    )
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("SENTIMENT_PROVIDER", "stub")
+    cfg = config.load_sentiment_config()
+    assert cfg.provider == "stub"
+    assert cfg.symbols == ["IWM", "DIA"]
