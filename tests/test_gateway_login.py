@@ -310,6 +310,26 @@ def test_example_file_defines_login_with_documented_signature():
     assert args.kwarg is not None
 
 
+def test_example_file_defines_login_config_and_login_uses_it():
+    tree = ast.parse((ROOT / "deploy" / "ibkr_auth_private.py.example").read_text())
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert "login_config" in funcs
+    args = funcs["login_config"].args
+    assert not args.args and not args.kwonlyargs
+    called = {
+        n.func.id
+        for n in ast.walk(funcs["login"])
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "login_config" in called
+
+
+def test_readme_probe_uses_login_config_from_the_private_module():
+    text = (ROOT / "deploy" / "README.md").read_text()
+    assert "from core import ibkr_auth_private" in text
+    assert "login_config" in text
+
+
 def test_requirements_login_pins_playwright_and_keeps_it_out_of_base():
     login_reqs = (ROOT / "requirements-login.txt").read_text()
     assert "-r requirements.txt" in login_reqs

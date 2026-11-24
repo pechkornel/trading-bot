@@ -517,11 +517,17 @@ docker compose --profile gateway --profile auto run --rm --no-deps -T cpgw_keepe
 from pathlib import Path
 from core.gateway_login import GatewayLoginConfig, playwright_page, spki_pin_from_pem
 
-cfg = GatewayLoginConfig.from_env()
-cfg = GatewayLoginConfig(base_url="https://127.0.0.1:5000", cert_file=cfg.cert_file)
+try:
+    from core import ibkr_auth_private
+except ModuleNotFoundError:
+    ibkr_auth_private = None
+# Same config as a real login: the private file's overrides when it defines login_config().
+make_config = getattr(ibkr_auth_private, "login_config", None)
+cfg = make_config() if make_config else GatewayLoginConfig.from_env()
+base = cfg.base_url or "https://127.0.0.1:5000"
 pin = spki_pin_from_pem(Path(cfg.cert_file).read_bytes())
 with playwright_page(cfg, pin) as page:
-    page.goto("https://127.0.0.1:5000/")
+    page.goto(base + "/")
     raw = page._page
     print("url:", raw.url)
     print("title:", raw.title())
@@ -550,7 +556,7 @@ The three result markers are texts that only appear after a submit, so no probe 
 
 A wrong marker is safe but stops the keeper. Success is decided by the gateway API (`/iserver/auth/status`), not by page text, so a wrong success marker only costs up to the 30 second API wait. A wrong bad-credentials or second-factor marker ends as "needs a manual step", which locks the keeper out after that one attempt (see step 15). Nothing is retried.
 
-If a selector shows `matches: 0`, override it in the private file. Edit `core/ibkr_auth_private.py` (copied from `deploy/ibkr_auth_private.py.example`) and use a changed copy of the config, for example:
+If a selector shows `matches: 0`, override it in the private file. Edit `core/ibkr_auth_private.py` (copied from `deploy/ibkr_auth_private.py.example`) and change `login_config()` to return a changed copy of the config. Both `login()` and the step 12 probe call `login_config()`, so the probe shows the overrides. For example:
 
 ```python
 import dataclasses
@@ -558,15 +564,18 @@ import dataclasses
 from core.gateway_login import GatewayLoginConfig, login_via_gateway_page
 
 
-def login(creds, *, port, **kwargs):
-    config = dataclasses.replace(
+def login_config():
+    return dataclasses.replace(
         GatewayLoginConfig.from_env(),
         username_selector="input#user",
     )
+
+
+def login(creds, *, port, **kwargs):
     return login_via_gateway_page(
         creds,
         port=port,
-        config=config,
+        config=login_config(),
         on_submit=kwargs.get("on_submit"),
     )
 ```
