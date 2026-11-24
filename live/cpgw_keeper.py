@@ -217,7 +217,7 @@ class Keeper:
                 "warn",
                 "the keeper state file is corrupt, so the keeper is locked out. Check "
                 "logs/keeper_state.json, then run: python -m live.cpgw_keeper --reset-lockout",
-                key="lockout",
+                key="state_corrupt",
                 cooldown_sec=LOCKOUT_REMINDER_SEC,
             )
             self._pending_warning = None
@@ -412,7 +412,7 @@ class Keeper:
             "error",
             f"the keeper is locked out and will not log in again ({reason}). Fix the cause "
             "(see the keeper logs), then run: python -m live.cpgw_keeper --reset-lockout",
-            key="lockout",
+            key=f"lockout:{now.isoformat()}",  # one key per lockout, so a later one is sent
             cooldown_sec=LOCKOUT_REMINDER_SEC,
         )
 
@@ -574,10 +574,19 @@ class Keeper:
             self._send_lockout_alert(self.state.locked_out_reason, now)
 
 
-def reset_lockout(state_path: Path, *, storage: Any = None) -> None:
-    """Clear the lockout and the failure counters. Keeps session times and alert stamps."""
+def reset_lockout(state_path: Path, *, storage: Any = None, notifier: Any = None) -> None:
+    """Clear the lockout and the failure counters. Keeps session times and alert stamps,
+    except the lockout ones, so the next lockout is announced again."""
     state, _ = policy.load_state(state_path)
-    policy.save_state(state_path, policy.clear_lockout(state))
+    cleared = policy.clear_lockout(state)
+    cleared.last_alert_at.pop("lockout", None)
+    policy.save_state(state_path, cleared)
+    if notifier is not None:
+        for prefix in ("lockout", "not_paper", "state_corrupt"):
+            try:
+                notifier.clear_dedupe_prefix(prefix)
+            except Exception:  # noqa: BLE001
+                pass
     if storage is not None:
         try:
             storage.log_event("info", SOURCE, "lockout cleared with --reset-lockout")
@@ -603,7 +612,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.reset_lockout:
-        reset_lockout(KEEPER_STATE_FILE, storage=Storage())
+        storage = Storage()
+        notifier = TelegramNotifier(TelegramConfig.from_env(), source="keeper", storage=storage)
+        reset_lockout(KEEPER_STATE_FILE, storage=storage, notifier=notifier)
         print("keeper lockout cleared")
         return 0
     keeper = Keeper(once=args.once)

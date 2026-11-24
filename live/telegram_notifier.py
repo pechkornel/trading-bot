@@ -110,6 +110,19 @@ class TelegramNotifier:
         except Exception:
             pass
 
+    def clear_dedupe_prefix(self, prefix: str) -> None:
+        """Forget the persisted cooldown of every dedupe key that starts with `prefix`.
+
+        Never raises. Used after --reset-lockout so the next lockout is announced."""
+        try:
+            state = self._load_state()
+            kept = {k: v for k, v in state["last_sent"].items() if not k.startswith(prefix)}
+            if len(kept) != len(state["last_sent"]):
+                state["last_sent"] = kept
+                self._save_state(state)
+        except Exception:
+            pass
+
     # --- sending ---
 
     def send(

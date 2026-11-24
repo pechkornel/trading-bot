@@ -186,7 +186,7 @@ def test_keeper_stops_logging_in_at_the_cap_and_alerts(env):
     env.client.authenticated = False
     keeper.tick()
     assert env.login_calls == 6
-    alerts = [n for n in env.notifier.sent if n["key"] == "lockout"]
+    alerts = [n for n in env.notifier.sent if n["key"].startswith("lockout:")]
     assert len(alerts) == 1
     assert "locked out" in alerts[0]["text"]
     assert "6" in alerts[0]["text"]

@@ -513,3 +513,58 @@ def test_import_does_not_import_playwright():
     root = Path(__file__).resolve().parent.parent
     result = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# ---- lockout alert dedupe ----
+
+
+def _real_notifier(tmp_path):
+    import httpx
+
+    from live.telegram_notifier import TelegramConfig, TelegramNotifier
+
+    posts: list[str] = []
+
+    def handler(request):
+        posts.append(request.content.decode())
+        return httpx.Response(200, json={"ok": True})
+
+    notifier = TelegramNotifier(
+        TelegramConfig(token="1:fake-token", chat_id="42"),
+        source="keeper",
+        transport=httpx.MockTransport(handler),
+        state_path=tmp_path / "tg_state.json",
+    )
+    return notifier, posts
+
+
+def _lockout_posts(posts):
+    return [p for p in posts if "reset-lockout" in p]
+
+
+def test_second_lockout_after_reset_sends_a_second_alert(env, tmp_path):
+    notifier, posts = _real_notifier(tmp_path)
+    env.notifier = notifier
+    env.login_script = [SecondFactorRequired("needs 2fa"), SecondFactorRequired("needs 2fa")]
+
+    env.keeper().tick()
+    assert env.state().locked_out_reason
+    assert len(_lockout_posts(posts)) == 1
+
+    env.clock.advance(minutes=10)
+    cpgw_keeper.reset_lockout(env.state_path, storage=env.storage, notifier=notifier)
+    assert env.state().locked_out_reason is None
+
+    env.clock.advance(minutes=10)
+    env.keeper().tick()  # logs in again, fails again, second lockout
+    assert env.login_calls == 2
+    assert env.state().locked_out_reason
+    assert len(_lockout_posts(posts)) == 2
+
+
+def test_corrupt_state_alert_has_its_own_key(env):
+    env.state_path.write_text("not json")
+    keeper = env.keeper()
+    keeper.start()
+    keys = [n["key"] for n in env.notifier.sent]
+    assert "state_corrupt" in keys

@@ -207,3 +207,14 @@ def test_cli_test_exit_code_when_not_sent():
             return False
 
     assert tn.main(["--test"], notifier_factory=lambda: Fake()) == 1
+
+
+def test_clear_dedupe_prefix_removes_matching_keys_only(tmp_path):
+    notifier, requests = make(tmp_path)
+    notifier.send("session", "a", dedupe_key="lockout:1", cooldown_sec=86400)
+    notifier.send("session", "b", dedupe_key="other", cooldown_sec=86400)
+    assert len(requests) == 2
+    notifier.clear_dedupe_prefix("lockout")
+    notifier.send("session", "a again", dedupe_key="lockout:1", cooldown_sec=86400)
+    notifier.send("session", "b again", dedupe_key="other", cooldown_sec=86400)
+    assert len(requests) == 3
