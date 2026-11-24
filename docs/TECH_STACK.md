@@ -138,9 +138,9 @@ All three CDN scripts are pinned to specific versions in `templates/base.html`. 
 
 | Tool | Used for |
 |---|---|
-| **Docker** + **docker compose** | Production deployment. One image, four services (`dashboard`, `cpgw_keeper`, `portfolio`, `sentiment`). `network_mode: host` so the containers reach CPGW at `localhost:5000`. |
+| **Docker** + **docker compose** | Production deployment. One image, four services (`dashboard`, `cpgw_keeper`, `portfolio`, `sentiment`). `network_mode: host` so the containers reach CPGW at `localhost:5000`. An optional fifth service, `ibkr_gateway` (profile `gateway`), runs a pinned native build of the gateway on `127.0.0.1:5000`, see `docs/adr/0001-native-ibkr-gateway-container.md`. |
 | **systemd** | Alternative for users who don't want Docker. Five unit templates: `cpgw.service` (Java CPGW on host) + four for the Python services. Hardened with `ProtectSystem=full`, `ProtectHome=read-only`, `ReadWritePaths` scoped to logs + artifacts. |
-| **Tailscale** | Private remote access. Dashboard binds to `127.0.0.1:8765` (in dev) or `0.0.0.0:8765` (in Docker, behind `network_mode: host`); only Tailnet peers can reach it. Public internet exposure is explicitly **never** part of the design. |
+| **Tailscale** | Private remote access. Dashboard binds to `127.0.0.1:8765` by default, in dev and in Docker (`DASHBOARD_HOST`). Tailnet peers reach it through `tailscale serve --bg 8765`, which proxies HTTPS to the loopback port. Public internet exposure is explicitly **never** part of the design. |
 | **cron** | Nightly backup at 03:15 (`deploy/backup.sh`). |
 
 Why this exact split (Docker + Tailscale + systemd-for-Java-only): the bot itself benefits from containerization (clean Python env, one-command upgrade). CPGW is a stateful Java app that wants persistent disk + a JVM; running it natively under systemd is simpler than wrapping it. Tailscale beats every other "expose my dashboard" option for a home server (no auth needed, no port forwards, no public surface).

@@ -43,7 +43,7 @@ sudo ufw default allow outgoing
 
 **SSH access - pick one, then run the matching commands below.**
 
-The bot itself never opens any port other than 22; the dashboard lives on the Tailnet (via `network_mode: host` + Tailscale, set up later).
+The bot itself never opens any port other than 22; the dashboard binds to `127.0.0.1` and is published to the Tailnet with `tailscale serve`, set up later.
 
 - **A. Tailscale-only SSH + keep password login** *(recommended if you log in from multiple personal machines)* - port 22 is only reachable from your Tailnet, so brute-forcing it requires already being on your Tailnet. You install Tailscale in step 2 below; come back here and run this *after* step 2:
 
@@ -94,20 +94,33 @@ docker compose version
 ## 2. Install Tailscale (for remote dashboard access)
 
 Without this, you'd have to SSH-tunnel port 8765 every time you want to look at
-the dashboard. Tailscale makes the bot reachable at a stable `100.x.x.x`
-address from any device on your Tailnet, with no port exposure to the public
-internet.
+the dashboard. With `tailscale serve`, the dashboard is reachable over HTTPS from
+any device on your Tailnet, with no port exposure to the public internet.
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up                            # follow the URL it prints
-tailscale ip -4                              # note this IP, you'll hit the dashboard at <ip>:8765
 tailscale status
 ```
+
+The dashboard binds to `127.0.0.1:8765` and has no login. After step 6, publish it to your
+Tailnet only:
+
+```bash
+sudo tailscale serve --bg 8765               # tailnet only, HTTPS on https://<machine>.<tailnet>.ts.net
+tailscale serve status
+tailscale funnel status                      # must show no Funnel
+```
+
+Never run `tailscale funnel`: it publishes the dashboard to the internet. Undo with
+`sudo tailscale serve reset`.
 
 ---
 
 ## 3. Install Java + CPGW (the only thing not in a container)
+
+Alternative: run the gateway as a pinned native container (compose profile `gateway`), see the
+Docker home server section in `deploy/README.md`. Use one or the other, both want port 5000.
 
 ```bash
 sudo apt install -y openjdk-17-jre-headless unzip
@@ -231,10 +244,10 @@ Once the keeper says `login OK`, everything else lights up automatically:
 - `sentiment` (Alpha Vantage poll every hour)
 - `portfolio` (multi-sleeve runner, **dry-run** by default)
 
-Open the dashboard from any Tailnet device:
+Open the dashboard from any Tailnet device, after `sudo tailscale serve --bg 8765` (section 2):
 
 ```
-http://<tailnet-ip>:8765
+https://<machine>.<tailnet>.ts.net
 ```
 
 Verify the paper lock and that everything's authenticated:
@@ -335,7 +348,7 @@ older. Restore with `tar -xzf <file>.tar.gz -C /opt/trading-bot/`.
 - [ ] `docker compose ps` → all 4 services `Up`
 - [ ] `docker compose logs cpgw_keeper | grep "login OK"` → at least one match
 - [ ] `curl -s http://localhost:8765/api/health` → `"paper":true,"ib_port":5000`
-- [ ] Dashboard reachable from another Tailnet device at `http://<tailnet-ip>:8765`
+- [ ] Dashboard reachable from another Tailnet device at `https://<machine>.<tailnet>.ts.net` (`tailscale serve status`, and `tailscale funnel status` shows no Funnel)
 - [ ] `ls models/artifacts/` → at least one trained model
 - [ ] `chmod 600 .env` (no group/world read)
 - [ ] `crontab -l` shows the nightly backup line
