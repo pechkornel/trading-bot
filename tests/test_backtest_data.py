@@ -241,3 +241,62 @@ def test_trailing_nan_row_is_dropped_and_not_cached(tmp_path):
 def test_nan_inside_the_series_is_still_an_error(tmp_path):
     with pytest.raises(DataError, match="SPY: missing"):
         _load(tmp_path, TailNaNFakes(nan_at=2), tickers=("SPY",))
+
+
+def _ny(text: str):
+    return pd.Timestamp(text, tz="America/New_York").to_pydatetime()
+
+
+class TodayFakes(Fakes):
+    """Frames whose last row is dated 2024-03-13 (a Wednesday), with a live Close."""
+
+    def fetch_yahoo(self, ticker: str) -> pd.DataFrame:
+        self.yahoo_calls.append(ticker)
+        idx = pd.bdate_range(end="2024-03-13", periods=5)
+        close = pd.Series([100.0 + i for i in range(5)], index=idx)
+        return pd.DataFrame({"Close": close, "Adj Close": close * 0.98})
+
+
+def _load_at(tmp_path, when):
+    return load_market_data(
+        ["SPY", "^VIX"],
+        ["T10Y2Y"],
+        tmp_path,
+        fetch_yahoo=TodayFakes().fetch_yahoo,
+        fetch_fred=Fakes().fetch_fred,
+        now=lambda: _ny(when),
+    )
+
+
+def test_download_during_market_hours_drops_todays_row(tmp_path):
+    md = _load_at(tmp_path, "2024-03-13 11:00")
+    assert md.raw_close.index[-1] == pd.Timestamp("2024-03-12")
+    assert len(md.raw_close) == 4
+    assert len(pd.read_csv(tmp_path / "yahoo" / "SPY.csv")) == 4
+
+
+def test_download_at_17h_keeps_etf_row_but_drops_vix_row(tmp_path):
+    md = _load_at(tmp_path, "2024-03-13 17:00")
+    assert md.raw_close["SPY"].index[-1] == pd.Timestamp("2024-03-13")
+    assert pd.isna(md.raw_close.loc["2024-03-13", "^VIX"])
+    assert md.raw_close["^VIX"].dropna().index[-1] == pd.Timestamp("2024-03-12")
+
+
+def test_download_at_18h_keeps_both(tmp_path):
+    md = _load_at(tmp_path, "2024-03-13 18:00")
+    assert md.raw_close.loc["2024-03-13"].notna().all()
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["tickers"]["SPY"]["dropped_unsettled"] == []
+    assert manifest["tickers"]["^VIX"]["dropped_unsettled"] == []
+
+
+def test_manifest_records_dropped_dates(tmp_path):
+    _load_at(tmp_path, "2024-03-13 17:00")
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["tickers"]["SPY"]["dropped_unsettled"] == []
+    assert manifest["tickers"]["^VIX"]["dropped_unsettled"] == ["2024-03-13"]
+
+
+def test_weekend_download_keeps_friday(tmp_path):
+    md = _load_at(tmp_path, "2024-03-16 11:00")
+    assert md.raw_close.index[-1] == pd.Timestamp("2024-03-13")
