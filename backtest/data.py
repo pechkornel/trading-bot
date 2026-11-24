@@ -19,7 +19,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from datetime import time as dtime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -29,6 +31,12 @@ _ATTEMPTS = 3
 _PAUSE_SEC = 1.0
 _COLUMNS = ["Close", "Adj Close"]
 
+_NY = ZoneInfo("America/New_York")
+_SETTLE_ETF = dtime(16, 30)
+_SETTLE_LATE = dtime(17, 15)
+_LATE_SETTLERS = {"^VIX", "DX-Y.NYB"}
+
+Clock = Callable[[], datetime]
 FetchYahoo = Callable[[str], pd.DataFrame]
 FetchFred = Callable[[str], pd.Series]
 
@@ -86,6 +94,29 @@ def drop_incomplete_tail(df: pd.DataFrame) -> pd.DataFrame:
         return df.iloc[0:0]
     last_complete = complete.to_numpy().nonzero()[0][-1]
     return df.iloc[: last_complete + 1]
+
+
+def drop_unsettled_today(
+    df: pd.DataFrame, ticker: str, now: datetime
+) -> tuple[pd.DataFrame, list[str]]:
+    """Drop rows dated on or after today (New York) unless the day has settled.
+
+    During US market hours Yahoo returns today's row with a live Close that is
+    not final. A row for today is kept only when `now` is after 16:30 New York
+    time for ETFs, or after 17:15 for ^VIX and DX-Y.NYB, which settle later.
+    Returns the kept frame and the dropped dates as YYYY-MM-DD strings.
+    """
+    if len(df) == 0:
+        return df, []
+    local = now.astimezone(_NY) if now.tzinfo else now.replace(tzinfo=_NY)
+    cutoff = _SETTLE_LATE if ticker in _LATE_SETTLERS else _SETTLE_ETF
+    today = pd.Timestamp(local.date())
+    limit = today + pd.Timedelta(days=1) if local.time() > cutoff else today
+    dates = _naive_dates(df.index)
+    drop = dates >= limit
+    if not drop.any():
+        return df, []
+    return df[~drop], [d.strftime("%Y-%m-%d") for d in dates[drop]]
 
 
 def _safe(name: str) -> str:
@@ -180,8 +211,12 @@ def _yfinance_version() -> str | None:
         return None
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _range(idx: pd.Index) -> dict:
@@ -199,8 +234,13 @@ def load_market_data(
     refresh: bool = False,
     fetch_yahoo: FetchYahoo | None = None,
     fetch_fred: FetchFred | None = None,
+    now: Clock | None = None,
 ) -> MarketData:
-    """Load every ticker and FRED series, downloading what is missing (or all if refresh)."""
+    """Load every ticker and FRED series, downloading what is missing (or all if refresh).
+
+    `now` is the clock used by the intraday guard (default: current UTC time).
+    """
+    clock = now or _now
     cache = Path(cache_dir)
     fetch_yahoo = fetch_yahoo or _default_fetch_yahoo
     fetch_fred = fetch_fred or _default_fetch_fred
@@ -229,9 +269,13 @@ def load_market_data(
             df = _retry(ticker, lambda t=ticker: fetch_yahoo(t))
             if not isinstance(df, pd.DataFrame):
                 raise DataError(f"{ticker}: fetcher returned no data frame")
-            _write_yahoo(path, ticker, drop_incomplete_tail(df))
+            df, dropped = drop_unsettled_today(drop_incomplete_tail(df), ticker, clock())
+            _write_yahoo(path, ticker, df)
             downloaded = True
-            manifest["tickers"][ticker] = {"downloaded_at": _stamp()}
+            manifest["tickers"][ticker] = {
+                "downloaded_at": _stamp(),
+                "dropped_unsettled": dropped,
+            }
         frame = _read_yahoo(path, ticker)
         raw[ticker] = frame["Close"]
         adj[ticker] = frame["Adj Close"]
