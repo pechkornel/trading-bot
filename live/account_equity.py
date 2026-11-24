@@ -108,6 +108,12 @@ def _resolve(
             f"({cfg.equity_min_ratio:g}x to {cfg.equity_max_ratio:g}x starting_equity)",
             last,
         )
+    if last is not None and abs(amount - last.equity) / last.equity > cfg.equity_max_step:
+        return _fallback(
+            cfg,
+            f"net liquidation moved more than {cfg.equity_max_step:.0%} since {last.ts.isoformat()}",
+            last,
+        )
     return EquityReading(amount, "gateway", "", currency)
 
 

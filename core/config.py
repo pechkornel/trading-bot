@@ -92,7 +92,9 @@ class PortfolioConfig:
     # starting_equity stays the fallback and the anchor of the sanity range.
     use_account_equity: bool = True
     equity_min_ratio: float = 0.25
-    equity_max_ratio: float = 4.0
+    equity_max_ratio: float = 2.0
+    # A new reading that differs from the last accepted one by more than this fraction is rejected.
+    equity_max_step: float = 0.25
     equity_currency: str = "USD"
     # A failed read reuses the last accepted gateway reading if it is younger than this.
     equity_last_max_age_sec: int = 86400
@@ -105,6 +107,8 @@ class PortfolioConfig:
                 "equity ratios must satisfy 0 < equity_min_ratio <= 1 <= equity_max_ratio, "
                 f"got {self.equity_min_ratio} and {self.equity_max_ratio}"
             )
+        if not self.equity_max_step > 0:
+            raise ValueError(f"equity_max_step must be > 0, got {self.equity_max_step}")
 
 
 @dataclass

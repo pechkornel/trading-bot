@@ -99,7 +99,7 @@ def test_portfolio_config_account_equity_defaults():
     cfg = PortfolioConfig()
     assert cfg.use_account_equity is True
     assert cfg.equity_min_ratio == 0.25
-    assert cfg.equity_max_ratio == 4.0
+    assert cfg.equity_max_ratio == 2.0
     assert cfg.equity_currency == "USD"
 
 
@@ -128,7 +128,7 @@ def test_load_portfolio_without_account_equity_keys_uses_defaults(monkeypatch):
     cfg = load_portfolio()
     assert cfg.use_account_equity is True
     assert cfg.equity_min_ratio == 0.25
-    assert cfg.equity_max_ratio == 4.0
+    assert cfg.equity_max_ratio == 2.0
     assert cfg.equity_currency == "USD"
 
 
