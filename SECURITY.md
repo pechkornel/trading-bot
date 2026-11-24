@@ -137,6 +137,12 @@
 - **Session cookie in backups.** `logs/cpgw_session.json` can hold the session cookie (it may
   be empty, because the gateway holds the session itself) and is included in the nightly
   backup. Protect the backup directory.
+- **Cookie-less 401 and the login gate.** Right before a login the keeper asks the gateway for
+  the auth status with no cookie. A 401 is read as "nobody is logged in" only when
+  `keeper.cookieless_401_means_logged_out` is true (the default). That is safe only if the
+  gateway session is gateway-wide. Check it once on the server before the first automatic
+  login (`deploy/README.md` section 0B step 13). If the gateway answers 401 while you are
+  logged in, set the key to false: a 401 is then "unsure" and the keeper never submits on it.
 - **Dashboard-spawned workers.** The dashboard can start workers inside its own container.
   That container gets `CPGW_CA_FILE` from `.env` but does not mount the `ibkr_gateway_tls`
   volume, and it has no login secret and no Chromium. A keeper started there cannot log in,

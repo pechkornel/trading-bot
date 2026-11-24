@@ -334,6 +334,9 @@ class KeeperConfig:
         6  # all submitted logins per failed_login_window_sec, success or not
     )
     min_session_sec: int = 600  # a session shorter than this makes the next drop back off
+    # A cookie-less 401 from the gateway means "nobody is logged in". Only true when the
+    # gateway session is gateway-wide. Set false when it answers 401 while logged in.
+    cookieless_401_means_logged_out: bool = True
 
     def __post_init__(self) -> None:
         for key in (
@@ -369,6 +372,11 @@ class KeeperConfig:
             ZoneInfo(tz)
         except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
             raise ValueError(f"keeper.timezone {tz!r} is not a known time zone") from exc
+        if not isinstance(self.cookieless_401_means_logged_out, bool):
+            raise ValueError(
+                "keeper.cookieless_401_means_logged_out must be true or false (a YAML "
+                f"boolean), got {self.cookieless_401_means_logged_out!r}"
+            )
         prefix = self.paper_account_prefix
         if not isinstance(prefix, str) or not prefix.strip():
             raise ValueError(

@@ -217,3 +217,4 @@ keeper:
   paper_account_prefix: "DU"             # every account id after login must start with this, or the keeper logs out and locks
   max_logins_per_window: 6               # total submitted logins per window, even successful ones; the cap locks the keeper until it rolls off or --reset-lockout
   min_session_sec: 600                   # a session that lasted less than this (10 minutes) makes the next drop back off 60, 120, 240 ... seconds
+  cookieless_401_means_logged_out: true   # true: a cookie-less 401 from auth/status means nobody is logged in. Set false if the gateway answers 401 to a cookie-less request while you are logged in (deploy/README.md 0B step 13 check); then a 401 counts as unsure and the keeper never submits on it

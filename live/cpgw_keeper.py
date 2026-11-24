@@ -314,7 +314,9 @@ class Keeper:
             probe = self._probe_factory(self.cpgw_port)
             answer = probe.auth_status()
         except NotAuthenticatedError:
-            return "ok"  # an explicit 401 with no cookie: nobody is logged in
+            # An explicit 401 with no cookie means nobody is logged in, but only when the
+            # gateway session is gateway-wide (keeper.cookieless_401_means_logged_out).
+            return "ok" if self.cfg.cookieless_401_means_logged_out else "unsure"
         except Exception:  # noqa: BLE001 - network error, 5xx and anything else: unsure
             return "unsure"
         finally:

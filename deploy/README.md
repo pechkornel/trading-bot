@@ -586,6 +586,15 @@ def login(creds, *, port, **kwargs):
 
 Check 10 is part of this step.
 
+First, the cookie-less 401 check. Before the first automatic login, find out how the gateway answers a request that carries no cookie. The keeper reads a cookie-less 401 as "nobody is logged in". That is only safe when the gateway session is gateway-wide. Log in once by hand in a browser (or use a gateway that is already authenticated), then run this on the Ubuntu server:
+
+```bash
+curl -sk -X POST https://127.0.0.1:5000/v1/api/iserver/auth/status
+```
+
+- It reports `"authenticated":true`: keep the default (`cookieless_401_means_logged_out: true` in `config/symbols.yaml`).
+- It returns 401 while you are logged in: set `cookieless_401_means_logged_out: false` in the `keeper:` block of `config/symbols.yaml`. A cookie-less 401 then counts as "unsure": the keeper never submits on it and alerts after repeated unsure checks. Then expect to log in by hand after a session loss, because the keeper cannot tell a lost session from a cookie-bound one.
+
 ```bash
 docker compose --profile gateway --profile auto run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --once 2>&1 | tee /tmp/keeper_first_login.txt
 ```
