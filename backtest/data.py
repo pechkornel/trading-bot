@@ -15,6 +15,8 @@ the frames a caller gets do not depend on whether the cache was warm.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -227,6 +229,70 @@ def _range(idx: pd.Index) -> dict:
     }
 
 
+def _load_all(
+    tickers: list[str],
+    fred_ids: list[str],
+    cache: Path,
+    stage: Path,
+    refresh: bool,
+    fetch_yahoo: FetchYahoo,
+    fetch_fred: FetchFred,
+    clock: Clock,
+    manifest: dict,
+):
+    """Read cached files and download the rest into `stage`. Never writes to `cache`."""
+    downloaded = False
+    raw: dict[str, pd.Series] = {}
+    adj: dict[str, pd.Series] = {}
+    for ticker in tickers:
+        path = cache / "yahoo" / f"{_safe(ticker)}.csv"
+        if refresh or not path.exists():
+            if downloaded:
+                time.sleep(_PAUSE_SEC)
+            df = _retry(ticker, lambda t=ticker: fetch_yahoo(t))
+            if not isinstance(df, pd.DataFrame):
+                raise DataError(f"{ticker}: fetcher returned no data frame")
+            df, dropped = drop_unsettled_today(drop_incomplete_tail(df), ticker, clock())
+            path = stage / "yahoo" / f"{_safe(ticker)}.csv"
+            _write_yahoo(path, ticker, df)
+            downloaded = True
+            manifest["tickers"][ticker] = {
+                "downloaded_at": _stamp(),
+                "dropped_unsettled": dropped,
+            }
+        frame = _read_yahoo(path, ticker)
+        raw[ticker] = frame["Close"]
+        adj[ticker] = frame["Adj Close"]
+        manifest["tickers"].setdefault(ticker, {}).update(_range(frame.index))
+
+    fred: dict[str, pd.Series] = {}
+    for sid in fred_ids:
+        path = cache / "fred" / f"{_safe(sid)}.csv"
+        if refresh or not path.exists():
+            if downloaded:
+                time.sleep(_PAUSE_SEC)
+            s = _retry(sid, lambda i=sid: fetch_fred(i))
+            path = stage / "fred" / f"{_safe(sid)}.csv"
+            _write_fred(path, sid, s)
+            downloaded = True
+            manifest["fred"][sid] = {"downloaded_at": _stamp()}
+        fred[sid] = _read_fred(path, sid)
+        manifest["fred"].setdefault(sid, {}).update(_range(fred[sid].index))
+    return raw, adj, fred, downloaded
+
+
+def _commit_stage(stage: Path, cache: Path) -> None:
+    """Move staged files into the cache, the manifest last."""
+    if not stage.exists():
+        return
+    files = sorted(p for p in stage.rglob("*") if p.is_file())
+    files.sort(key=lambda p: p.name == "manifest.json")
+    for src in files:
+        dest = cache / src.relative_to(stage)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(src, dest)
+
+
 def load_market_data(
     tickers: list[str],
     fred_ids: list[str],
@@ -258,47 +324,25 @@ def load_market_data(
         "fred": dict(old.get("fred", {})),
     }
 
-    downloaded = False
-    raw: dict[str, pd.Series] = {}
-    adj: dict[str, pd.Series] = {}
-    for ticker in tickers:
-        path = cache / "yahoo" / f"{_safe(ticker)}.csv"
-        if refresh or not path.exists():
-            if downloaded:
-                time.sleep(_PAUSE_SEC)
-            df = _retry(ticker, lambda t=ticker: fetch_yahoo(t))
-            if not isinstance(df, pd.DataFrame):
-                raise DataError(f"{ticker}: fetcher returned no data frame")
-            df, dropped = drop_unsettled_today(drop_incomplete_tail(df), ticker, clock())
-            _write_yahoo(path, ticker, df)
-            downloaded = True
-            manifest["tickers"][ticker] = {
-                "downloaded_at": _stamp(),
-                "dropped_unsettled": dropped,
-            }
-        frame = _read_yahoo(path, ticker)
-        raw[ticker] = frame["Close"]
-        adj[ticker] = frame["Adj Close"]
-        manifest["tickers"].setdefault(ticker, {}).update(_range(frame.index))
-
-    fred: dict[str, pd.Series] = {}
-    for sid in fred_ids:
-        path = cache / "fred" / f"{_safe(sid)}.csv"
-        if refresh or not path.exists():
-            if downloaded:
-                time.sleep(_PAUSE_SEC)
-            s = _retry(sid, lambda i=sid: fetch_fred(i))
-            _write_fred(path, sid, s)
-            downloaded = True
-            manifest["fred"][sid] = {"downloaded_at": _stamp()}
-        fred[sid] = _read_fred(path, sid)
-        manifest["fred"].setdefault(sid, {}).update(_range(fred[sid].index))
-
-    if downloaded or not manifest_path.exists():
-        manifest["yfinance_version"] = _yfinance_version()
-        manifest["downloaded_at"] = _stamp()
-        cache.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    # Downloads go to a temporary sibling folder and replace the cache only after every
+    # ticker and series succeeded, so a failure leaves the old cache and manifest intact.
+    stage = cache.with_name(cache.name + ".tmp")
+    if stage.exists():
+        shutil.rmtree(stage)
+    try:
+        raw, adj, fred, downloaded = _load_all(
+            tickers, fred_ids, cache, stage, refresh, fetch_yahoo, fetch_fred, clock, manifest
+        )
+        if downloaded or not manifest_path.exists():
+            manifest["yfinance_version"] = _yfinance_version()
+            manifest["downloaded_at"] = _stamp()
+            stage.mkdir(parents=True, exist_ok=True)
+            (stage / "manifest.json").write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+            )
+        _commit_stage(stage, cache)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
     raw_df = pd.DataFrame(raw, columns=list(tickers)).sort_index()
     adj_df = pd.DataFrame(adj, columns=list(tickers)).sort_index()

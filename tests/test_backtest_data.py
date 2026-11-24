@@ -300,3 +300,60 @@ def test_manifest_records_dropped_dates(tmp_path):
 def test_weekend_download_keeps_friday(tmp_path):
     md = _load_at(tmp_path, "2024-03-16 11:00")
     assert md.raw_close.index[-1] == pd.Timestamp("2024-03-13")
+
+
+class ShiftedFakes(Fakes):
+    """Like Fakes but with different prices, so a refresh visibly changes the files."""
+
+    def fetch_yahoo(self, ticker: str) -> pd.DataFrame:
+        self.yahoo_calls.append(ticker)
+        if self.fail.get(ticker, 0) > 0:
+            raise RuntimeError(f"boom {ticker}")
+        return _frame(base=900.0)
+
+
+def _snapshot(tmp_path) -> dict[str, bytes]:
+    return {
+        str(p.relative_to(tmp_path)): p.read_bytes()
+        for p in sorted(tmp_path.rglob("*"))
+        if p.is_file()
+    }
+
+
+def test_failed_refresh_leaves_cache_and_manifest_untouched(tmp_path):
+    cache = tmp_path / "cache"
+    _load(cache, Fakes())
+    before = _snapshot(cache)
+    with pytest.raises(DataError, match="\\^VIX"):
+        _load(cache, ShiftedFakes(fail={"^VIX": 99}), refresh=True)
+    assert _snapshot(cache) == before
+    assert [p.name for p in tmp_path.iterdir()] == ["cache"]
+
+
+def test_failed_fred_refresh_leaves_cache_untouched(tmp_path):
+    cache = tmp_path / "cache"
+    _load(cache, Fakes())
+    before = _snapshot(cache)
+
+    class BadFred(ShiftedFakes):
+        def fetch_fred(self, series_id):
+            raise RuntimeError("fred down")
+
+    with pytest.raises(DataError, match="T10Y2Y"):
+        _load(cache, BadFred(), refresh=True)
+    assert _snapshot(cache) == before
+    assert [p.name for p in tmp_path.iterdir()] == ["cache"]
+
+
+def test_successful_refresh_replaces_every_file(tmp_path):
+    cache = tmp_path / "cache"
+    _load(cache, Fakes())
+    before = _snapshot(cache)
+    md = _load(cache, ShiftedFakes(), refresh=True)
+    after = _snapshot(cache)
+    assert set(after) == set(before)
+    assert after["yahoo/SPY.csv"] != before["yahoo/SPY.csv"]
+    assert after["yahoo/_VIX.csv"] != before["yahoo/_VIX.csv"]
+    assert json.loads(after["manifest.json"])["tickers"]["SPY"]["rows"] == 5
+    assert md.raw_close["SPY"].iloc[0] == 900.0
+    assert [p.name for p in tmp_path.iterdir()] == ["cache"]
