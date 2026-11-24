@@ -394,3 +394,88 @@ def test_launch_sets_chromium_sandbox_explicitly_off(monkeypatch):
     assert seen["headless"] is True
     assert "--ignore-certificate-errors-spki-list=pin" in seen["args"]
     assert not any("sandbox" in a for a in seen["args"])
+
+
+def _fake_playwright_capturing_route(monkeypatch, seen):
+    import contextlib
+    import types
+
+    class FakeContext:
+        def route(self, pattern, handler):
+            seen["route"] = handler
+
+        def new_page(self):
+            return object()
+
+        def close(self):
+            pass
+
+    class FakeBrowser:
+        def new_context(self, **kwargs):
+            return FakeContext()
+
+        def close(self):
+            pass
+
+    class FakeChromium:
+        def launch(self, **kwargs):
+            seen["launched"] = True
+            return FakeBrowser()
+
+    class FakePw:
+        chromium = FakeChromium()
+
+    @contextlib.contextmanager
+    def fake_sync_playwright():
+        yield FakePw()
+
+    mod = types.ModuleType("playwright.sync_api")
+    mod.sync_playwright = fake_sync_playwright
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", mod)
+
+
+class _FakeRoute:
+    def __init__(self):
+        self.result = None
+
+    def continue_(self):
+        self.result = "continue"
+
+    def abort(self):
+        self.result = "abort"
+
+
+class _FakeRequest:
+    def __init__(self, url):
+        self.url = url
+
+
+def test_empty_base_url_allows_the_default_local_origin(monkeypatch):
+    # The step 12 probe passes a config with base_url "", like the example login_config().
+    seen = {}
+    _fake_playwright_capturing_route(monkeypatch, seen)
+    from dataclasses import replace
+
+    cfg = replace(config(), base_url="")
+    with gateway_login.playwright_page(cfg, "pin"):
+        pass
+    for url, expected in (
+        ("https://127.0.0.1:5000/sso/Login", "continue"),
+        ("https://example.com/x", "abort"),
+    ):
+        r = _FakeRoute()
+        seen["route"](r, _FakeRequest(url))
+        assert r.result == expected, url
+
+
+def test_playwright_page_refuses_a_non_local_base_url_before_launch(monkeypatch):
+    seen = {}
+    _fake_playwright_capturing_route(monkeypatch, seen)
+    from dataclasses import replace
+
+    cfg = replace(config(), base_url="https://gateway.example.com:5000")
+    with pytest.raises(gateway_login.LoginSetupError):
+        with gateway_login.playwright_page(cfg, "pin"):
+            pass
+    assert "launched" not in seen

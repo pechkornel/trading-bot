@@ -239,7 +239,12 @@ def playwright_page(config: GatewayLoginConfig, pin: str) -> Iterator[_Playwrigh
     except ImportError:
         raise LoginSetupError("playwright is not installed (see requirements-login.txt)") from None
 
-    parts = urlsplit(config.base_url)
+    # An empty base_url means the default local gateway, as in run_login_flow. Without
+    # this the allowed origin would be "://" and every request, the first goto included,
+    # would be blocked (the step 12 probe passes the config as login_config() returns it).
+    base_url = config.base_url or "https://127.0.0.1:5000"
+    _require_local(base_url)
+    parts = urlsplit(base_url)
     origin = f"{parts.scheme}://{parts.netloc}"
 
     def route(route, request) -> None:
