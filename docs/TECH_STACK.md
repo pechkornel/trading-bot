@@ -12,7 +12,7 @@ Every moving part in the bot, what it does, and why it's there. Roughly organize
                           │  https://localhost:5000   ← self-signed cert   │
                           └────────────────────────────────────────────────┘
                                               ▲
-                                       SRP-6a │ HTTPS REST
+              headless login │ HTTPS REST
                                               │
               ┌───────────────────────────────┼───────────────────────────┐
               │                               │                           │
@@ -90,16 +90,19 @@ This is the layer that changed in Phase 7. Old TWS API stack is gone.
 
 | Library | Why |
 |---|---|
-| **httpx** ≥ 0.27 | HTTP/1.1 client for CPGW REST. Synchronous mode - easier to reason about than async, fast enough. Self-signed cert handled with `verify=False` (URL is pinned to `localhost:5000`). |
-| **cryptography** ≥ 42 | Just RSA-PKCS1v1.5 encryption of the SRP session key K (IBKR's non-standard "RSA-K" extension). PyCA is the de-facto standard; no exotic crypto libs. |
-| **hashlib + secrets** (stdlib) | SHA-1 + CSPRNG for the SRP-6a math itself. Already in Python. |
+| **httpx** ≥ 0.27 | HTTP/1.1 client for CPGW REST. Synchronous mode - easier to reason about than async, fast enough. With `CPGW_CA_FILE` set it verifies the gateway's own certificate (host name checked). Without it (host Java gateway) it uses `verify=False` on `localhost:5000`. |
+| **cryptography** ≥ 42 | Computes the SPKI pin (SHA-256 of the public key) of the gateway certificate for the browser login. PyCA is the de-facto standard; no exotic crypto libs. |
+| **playwright** 1.55.0 (`requirements-login.txt`) | Headless Chromium for the login through the gateway's own login page. Only in the keeper image. Only the headless shell build is installed (`--only-shell chromium`): no X server, no Xvfb. The version is pinned; the browser download is not hash-pinned. |
 | ~~ibapi~~ | **Removed.** TWS binary API replaced by the REST API above. |
 
-The whole IBKR layer is three files:
+The IBKR layer:
 
-- `core/ibkr_auth.py` - broker login. Not included in the public version (stub only).
-- `core/cpgw_client.py` - REST wrapper. One class, one method per endpoint we care about. Handles cookie rotation, auto-confirms order-warning dialogs, caches symbol→conid lookups.
-- `live/cpgw_keeper.py` - long-running daemon that does the login + a `POST /tickle` every 60s + a deeper `auth/status` check every 5 min. Writes the session cookie to `logs/cpgw_session.json` (chmod 600) so other processes can pick it up.
+- `core/ibkr_auth.py` - loader for the login function. It uses the git-ignored `core/ibkr_auth_private.py` when present (thin wiring, template in `deploy/ibkr_auth_private.py.example`), else a stub. Auth types live in `core/auth_types.py`.
+- `core/gateway_login.py` - the tracked, tested login flow behind a small `LoginPage` protocol. Fills the gateway's login page in headless Chromium, pinned to the gateway's own certificate key. Success is decided by the gateway API, not by page text. Playwright is imported lazily, so other containers do not need it.
+- `core/secret_store.py` - loads `secrets/ibkr_login` (mode 600, owner check) and holds the redactor for secrets and tokens.
+- `core/cpgw_client.py` - REST wrapper. One class, one method per endpoint we care about. Handles cookie rotation, auto-confirms order-warning dialogs, caches symbol→conid lookups. Verifies the gateway certificate when `CPGW_CA_FILE` is set.
+- `live/keeper_policy.py` - pure session rules (no I/O): nightly gap and Saturday windows, the 24 h reset, backoff, lockout. Persists `logs/keeper_state.json`.
+- `live/cpgw_keeper.py` - long-running daemon. Checks the session with `POST /tickle` every 60 s, logs in again under the policy, runs the paper account guard (`DU` prefix), and writes the session cookie (it may be empty) to `logs/cpgw_session.json` (chmod 600). `--reset-lockout` clears a lockout.
 
 ---
 
@@ -111,7 +114,8 @@ The whole IBKR layer is three files:
 | Trained models | Files on disk | `models/artifacts/<name>/{model.pkl, metadata.json, scaler.gz?}`. Loadable by name from the registry. |
 | Session cookie | One JSON file | `logs/cpgw_session.json`, atomically written, `chmod 600`. |
 | Process tracking | One JSON file | `logs/processes.json` - what subprocesses the dashboard has started, with PIDs. |
-| Config | YAML + .env | `config/symbols.yaml` for declarative stuff (universe, weights, sizing), `.env` for secrets (`chmod 600`). |
+| Config | YAML + .env + secret files | `config/symbols.yaml` for declarative stuff (universe, weights, sizing, the `keeper:` session policy), `.env` for settings and the Telegram token (`chmod 600`), `secrets/` for the IBKR login and the gateway key password. |
+| Keeper state | One JSON file | `logs/keeper_state.json` (chmod 600, no secret): last login, failed attempts, lockout reason, alert stamps. |
 
 No Postgres, no Redis, no message broker. SQLite handles 99% of home-bot use cases at zero ops cost. If you ever push past a few hundred trades/day, swap to Postgres - `core/storage` is small enough to rewrite.
 
@@ -138,6 +142,7 @@ All three CDN scripts are pinned to specific versions in `templates/base.html`. 
 | What | Notes |
 |---|---|
 | **Provider**: Alpha Vantage News & Sentiment API | Free tier: 25 calls/day, 5/min. We batch all tactical symbols into one call → fits comfortably under the limit. |
+| **Status**: research, off | Alpha Vantage `NEWS_SENTIMENT` is now a premium endpoint. The sleeve has `status: research` and `allocation_pct: 0`, the `sentiment` compose service is in profile `research`, and `python -m live.sentiment_worker --check` exits 2 when the provider returns no data (`core/sentiment_health.py`). |
 | **Backend abstraction**: `core/sentiment.py` | `SentimentProvider` Protocol with two concrete implementations: `StubProvider` (returns 0 for everything, for testing) and `AlphaVantageProvider`. Easy to add FinBERT or LLM-scored news later. |
 | **Worker**: `live/sentiment_worker.py` | Standalone daemon, polls every hour by default, writes to the `sentiment` SQLite table. Trading processes only read from SQLite - never call the API themselves. Decoupling = trading loop stays fast + we don't blow the rate limit. |
 
@@ -147,7 +152,8 @@ All three CDN scripts are pinned to specific versions in `templates/base.html`. 
 
 | Tool | Used for |
 |---|---|
-| **Docker** + **docker compose** | Production deployment. One image, four services (`dashboard`, `cpgw_keeper`, `portfolio`, `sentiment`). `network_mode: host` so the containers reach CPGW at `localhost:5000`. An optional fifth service, `ibkr_gateway` (profile `gateway`), runs a pinned native build of the gateway on `127.0.0.1:5000`, see `docs/adr/0001-native-ibkr-gateway-container.md`. |
+| **Docker** + **docker compose** | Production deployment. `docker/Dockerfile` has three named stages: `deps` (shared base), `keeper` (adds Playwright and Chromium's headless shell, used by `cpgw_keeper` only, image `tradingbot-keeper:local`) and `app` (default target for every other service). Four bot services (`dashboard`, `cpgw_keeper`, `portfolio`, `sentiment`), the last one in profile `research` (normally off). `network_mode: host` so the containers reach CPGW at `localhost:5000`. Every service has `mem_limit` equal to `memswap_limit`: gateway 768m, keeper 640m, portfolio 640m, dashboard 512m, sentiment 256m. An optional service, `ibkr_gateway` (profile `gateway`), runs a pinned native build of the gateway on `127.0.0.1:5000` with its own TLS key and the `gateway_ssl_password` secret, see `docs/adr/0001-native-ibkr-gateway-container.md` and `docs/adr/0003-headless-gateway-login-and-file-secrets.md`. The gateway zip comes from `scripts/fetch_gateway.sh` into `vendor/`. |
+| **Compose secrets** | `secrets/ibkr_login` (keeper only) and `secrets/gateway_ssl_password` (gateway only), file based, mode 600. Not in `.env`. |
 | **systemd** | Alternative for users who don't want Docker. Five unit templates: `cpgw.service` (Java CPGW on host) + four for the Python services. Hardened with `ProtectSystem=full`, `ProtectHome=read-only`, `ReadWritePaths` scoped to logs + artifacts. |
 | **Tailscale** | Private remote access. Dashboard binds to `127.0.0.1:8765` by default, in dev and in Docker (`DASHBOARD_HOST`). Tailnet peers reach it through `tailscale serve --bg 8765`, which proxies HTTPS to the loopback port. Public internet exposure is explicitly **never** part of the design. |
 | **cron** | Nightly backup at 03:15 (`deploy/backup.sh`). |
@@ -161,7 +167,7 @@ Why this exact split (Docker + Tailscale + systemd-for-Java-only): the bot itsel
 | What | Notes |
 |---|---|
 | **smtplib + Gmail App Password** | Emails on every tactical trade. Code in `live/notifier.py`. Graceful no-op if EMAIL_USER/PASS aren't set (so dev doesn't spam your inbox). |
-| **Telegram** | Sketched but not wired. Will land in a future phase if you want real-time push instead of email. |
+| **Telegram** (`live/telegram_notifier.py`) | Plain-text alerts through `httpx` to the Bot API (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Used by the keeper (session lost, lockout, not a paper account, gateway down), the portfolio runner (every order tagged `[DRY-RUN]` or `[PAPER]`, errors, a daily summary after 17:00 New York time) and the sentiment worker (data missing). Redacted, deduplicated per key, capped at 20 messages per hour per process. A no-op without the two variables. `python -m live.telegram_notifier --test` sends one test message. |
 
 ---
 
@@ -190,7 +196,10 @@ trading-bot/
 │   ├── sizing.py             ← vol-target × signal-weight, gross + per-symbol caps
 │   ├── signal_fusion.py      ← TA confidence × sentiment → combined_confidence
 │   ├── sentiment.py          ← AlphaVantage + Stub providers
-│   ├── ibkr_auth.py          ← broker login (stub in the public version)
+│   ├── ibkr_auth.py          ← login loader (private wiring file or stub)
+│   ├── auth_types.py         ← login error types and IbkrCredentials
+│   ├── gateway_login.py      ← headless login flow (Playwright, lazy import)
+│   ├── secret_store.py       ← secret file loader and redactor
 │   ├── cpgw_client.py        ← REST wrapper for the gateway
 │   └── sleeves/
 │       ├── tactical.py       ← short/mid-term, TA × sentiment, vol-target sizing
@@ -202,7 +211,9 @@ trading-bot/
 │   └── artifacts/            ← per-model directories with model + metadata
 │
 ├── live/                     ← long-running processes
-│   ├── cpgw_keeper.py        ← SRP login + tickle keepalive
+│   ├── cpgw_keeper.py        ← headless login + tickle keepalive
+│   ├── keeper_policy.py      ← pure session rules, lockout state
+│   ├── telegram_notifier.py  ← Telegram alerts
 │   ├── portfolio_runner.py   ← multi-sleeve runner, the heart of the bot
 │   ├── runner.py             ← single-symbol runner (debug / legacy)
 │   ├── sentiment_worker.py   ← Alpha Vantage poller
@@ -222,11 +233,14 @@ trading-bot/
 │   ├── train_symbol.py       ← train one model from the CLI
 │   └── inspect_legacy.py     ← probe the pre-Phase-1 .pkl files
 │
-├── docker/Dockerfile         ← python:3.11-slim, non-root, ~150 MB
-├── docker-compose.yml        ← 4 services, healthchecks, network_mode: host
+├── docker/Dockerfile         ← python:3.11-slim, stages deps / keeper / app, non-root
+├── docker/gateway/           ← gateway image, entrypoint (own TLS key), conf template, pinned hash
+├── docker-compose.yml        ← services with memory limits, secrets, network_mode: host
+├── secrets/                  ← README and *.example tracked; real files git-ignored
 ├── deploy/
 │   ├── UBUNTU_SETUP.md       ← step-by-step headless install
-│   ├── README.md             ← Day-2 operations + alternative paths
+│   ├── README.md             ← Docker guide, Phase 1 upgrade steps, alternative paths
+│   ├── ibkr_auth_private.py.example  ← template for the private login wiring
 │   ├── backup.sh             ← nightly tar.gz to ~/backups/
 │   └── systemd/              ← 5 unit templates for non-Docker users
 │
@@ -236,7 +250,8 @@ trading-bot/
 │
 ├── requirements.txt          ← production deps (slim, no TF)
 ├── requirements-train.txt    ← adds TF for LSTM training
-├── SECURITY.md               ← audit of the SRP auth + integration concerns
+├── requirements-login.txt    ← adds Playwright for the keeper image
+├── SECURITY.md               ← secrets, keystore, lockout and integration concerns
 └── README.md                 ← phase-by-phase project log
 ```
 

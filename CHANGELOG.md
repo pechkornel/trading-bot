@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Headless login to the gateway's own login page with Playwright (`core/gateway_login.py`), wired through the git-ignored `core/ibkr_auth_private.py` (template: `deploy/ibkr_auth_private.py.example`). Headless Chromium only, no X server or Xvfb. Certificate errors are never ignored: the browser accepts only the gateway's own key.
+- Credentials from a chmod 600 secret file or Docker secret (`secrets/ibkr_login`). The keeper refuses a group or world readable file, a file owned by another uid, and a set `IBKR_PASSWORD`.
+- Keeper session policy: a check every 60 s, a new login after the nightly gap, Saturday maintenance and the 24 h reset, backoff capped at 30 minutes, and a persisted lockout after any wrong password, second-factor prompt or unknown page state, or after 3 submitted attempts in 24 h. New flag `python -m live.cpgw_keeper --reset-lockout`.
+- Paper account guard: the keeper logs out and locks itself when an account id does not start with `DU`.
+- Telegram notifier (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`): daily summary, every order (tagged `[DRY-RUN]` or `[PAPER]`), errors, session lost, lockout, sentiment data missing. Deduplicated and capped at 20 messages per hour. `python -m live.telegram_notifier --test` sends a test message.
+- `python -m live.sentiment_worker --check` exits 2 when the provider returns no data.
+- CI step that fails when the private login module or files under `secrets/` or `vendor/` are tracked.
+- `scripts/fetch_gateway.sh` downloads the pinned gateway release into the git-ignored `vendor/` folder and checks its SHA-256.
+- Memory limits (`mem_limit` equal to `memswap_limit`) for every compose service.
+- "Phase 1 upgrade (paper account only)" server steps in `deploy/README.md`, with a check and a safe fallback for each thing only the server can confirm.
+- ADR 0003: headless gateway login and file secrets.
 - Loader for a private, git-ignored `core/ibkr_auth_private.py` login module. The public stub is used only when that file is missing.
 - `SENTIMENT_PROVIDER` in `.env` overrides the sentiment provider in `config/symbols.yaml`.
 - `DASHBOARD_HOST` in `.env` sets the dashboard bind address.
@@ -19,7 +30,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (538 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (828 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - Account equity sizing: each cycle sizes the sleeves from the paper account's net liquidation and logs one `equity:` event. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio`, `equity_max_step`, `equity_last_max_age_sec` and `equity_currency` (#20).
 - The control page shows the last net liquidation next to the starting equity (#20).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
@@ -28,6 +39,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The sentiment satellite is in `status: research` with `allocation_pct: 0`, because Alpha Vantage `NEWS_SENTIMENT` is now premium. 30% of equity stays unallocated. A research sleeve must have 0% allocation.
+- The `sentiment` compose service moved to profile `research`, so `--profile auto` no longer polls it.
+- The gateway uses its own TLS key (generated on first start into the `ibkr_gateway_tls` volume), takes `sslPwd` from a Docker secret and allows only `127.0.0.1` and `172.31.250.1`. IBKR's shared default keystore is no longer used.
+- The gateway zip is fetched with `scripts/fetch_gateway.sh` and checked twice, instead of being downloaded during the image build.
+- The keeper runs from its own image target (`keeper`, headless Chromium) with the login secret. The other services use the `app` target.
+- `CPGWClient` verifies the gateway certificate when `CPGW_CA_FILE` is set.
+- `IbkrCredentials` hides the password in `repr`. The keeper banner shows only the first two characters of the username.
+- `.env.example` no longer has `IBKR_USERNAME` or `IBKR_PASSWORD`. It adds `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `IBKR_LOGIN_SECRET_FILE` and `CPGW_CA_FILE`.
+- **Upgrade note:** move `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` into `secrets/ibkr_login` (chmod 600, owner uid 1000), create `secrets/gateway_ssl_password`, run `scripts/fetch_gateway.sh`, and replace `core/ibkr_auth_private.py` with `deploy/ibkr_auth_private.py.example`. Follow `deploy/README.md` section 0B.
+- Known limit: workers started from the dashboard run inside the dashboard container, which has no certificate file, no login secret and no Chromium. Run the keeper as a compose service.
 - The Docker guide in `deploy/README.md` requires Docker Engine 28 or later.
 - `DASHBOARD_HOST` defaults to `127.0.0.1`, so the dashboard is no longer reachable on the tailnet IP directly.
   **Upgrade note:** run `sudo tailscale serve --bg 8765` and open the `https://<machine>.<tailnet>.ts.net` URL instead.
@@ -64,3 +85,7 @@ All notable changes to this project are documented here. The format follows
 ### Removed
 
 - `core.market_hours.is_core_rebalance_window` (it had no effect) (#5).
+
+### Security
+
+- No secret in logs, events, exceptions or Telegram messages: a redactor masks the password, username, Telegram token and cookies, and login errors are fixed strings.

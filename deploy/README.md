@@ -23,10 +23,11 @@ Pick one. Both end with a dashboard you reach via Tailscale.
   ```
   No GUI required, just a JVM. Once it's up, `curl -k https://localhost:5000/`
   should return the login page HTML.
-- The `cpgw_keeper` service runs the SRP-6a login automatically - you never need
-  to open the CPGW web UI. Credentials live in `.env` at the repo root (`IBKR_USERNAME`,
-  `IBKR_PASSWORD`); they go through SRP so the password never crosses the wire
-  in plaintext.
+- The `cpgw_keeper` service logs in automatically through the gateway's own login
+  page, with headless Chromium (Playwright), so you never need to open the CPGW web UI.
+  Credentials live in the file `secrets/ibkr_login` (mode 600), not in `.env`. See
+  section 0B. The login code itself is not part of the repo: you wire it in with
+  `core/ibkr_auth_private.py`, copied from `deploy/ibkr_auth_private.py.example`.
 
 > If you used Phase 5 with `ibapi` + IB Gateway (Java desktop with GUI login):
 > the new flow replaces that entirely. You no longer need to log in via VNC daily.
@@ -37,7 +38,9 @@ Pick one. Both end with a dashboard you reach via Tailscale.
 
 ## 0A. Home server (Docker)
 
-A fresh install on an Ubuntu box with Docker, reached over Tailscale, deployed by hand over SSH. It runs the gateway container, the dashboard, the keeper, the portfolio runner (dry run) and the sentiment worker.
+A fresh install on an Ubuntu box with Docker, reached over Tailscale, deployed by hand over SSH. It runs the gateway container, the dashboard, the keeper and the portfolio runner (dry run). The sentiment worker is off by default (compose profile `research`, see section 0B step 13).
+
+Already running an older version of this stack? Use section 0B (Phase 1 upgrade) instead of starting here.
 
 Notes before you start:
 
@@ -92,33 +95,35 @@ IBKR_PASSWORD=<your paper password>
 SENTIMENT_PROVIDER=stub
 ```
 
-- `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`.
-- Fill the `EMAIL_*` values too if you want notifications.
-- `.env` is git-ignored. Never commit it.
+- Do not put `IBKR_USERNAME` or `IBKR_PASSWORD` in `.env`. The keeper refuses to start while `IBKR_PASSWORD` is set. The login goes in `secrets/ibkr_login` (step 4).
+- `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`. The sentiment sleeve is off either way (allocation 0%).
+- Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts (create the bot with BotFather on your phone). Fill the `EMAIL_*` values only if you use the single-symbol runner, which still sends Gmail.
+- `.env` is git-ignored. Never commit it. It is loaded into every container, so it holds no broker secret.
 
-### 4. Private login module
+### 4. Secrets and private login module (server)
 
-The public repo has a stub login. The real one is a private file that stays on your machines and is never committed.
-
-Laptop (macOS zsh or Windows PowerShell, same command):
-
-```bash
-scp ibkr_auth_private.py <user>@<server>:~/trading-bot/core/ibkr_auth_private.py
-```
-
-Use the Tailscale name or IP of the server for `<server>`.
-
-Server:
+The public repo has a stub login. The login flow itself is the tracked module `core/gateway_login.py`. The private file `core/ibkr_auth_private.py` is only a few lines of wiring. It stays on your machines and is never committed. The login and the gateway key password are files under `secrets/`, never in `.env`.
 
 ```bash
 cd ~/trading-bot
+mkdir -p secrets && chmod 700 secrets
+umask 077
+cp secrets/ibkr_login.example secrets/ibkr_login
+nano secrets/ibkr_login                         # paper IBKR_USERNAME and IBKR_PASSWORD lines
+chmod 600 secrets/ibkr_login
+openssl rand -hex 24 > secrets/gateway_ssl_password
+sudo chown 10001:10001 secrets/gateway_ssl_password
+sudo chmod 600 secrets/gateway_ssl_password
+cp deploy/ibkr_auth_private.py.example core/ibkr_auth_private.py
 chmod 600 core/ibkr_auth_private.py
-git check-ignore -v core/ibkr_auth_private.py   # must print the .gitignore rule
+git check-ignore -v core/ibkr_auth_private.py secrets/ibkr_login secrets/gateway_ssl_password   # must print the rules
 git status --short                              # must print nothing
 ```
 
-- Never run `git add -f` on this file.
-- The Docker build copies it into the local image `tradingbot:local`. Never push that image to a registry.
+- `secrets/ibkr_login` must be owned by uid 1000 and mode 600. The keeper container runs as uid 1000 and refuses a file with another owner or any group or other permission.
+- `secrets/gateway_ssl_password` is for the gateway container (uid 10001). Details and checks are in section 0B.
+- Never run `git add -f` on any of these files.
+- The Docker build copies the private module into the local images. It holds no secret any more. Still, never push those images to a registry.
 
 ### 5. Gateway (server)
 
@@ -175,14 +180,13 @@ tailscale funnel status
 docker compose --profile gateway --profile auto up -d --build
 docker compose logs -f cpgw_keeper        # Ctrl+C to leave
 docker compose logs portfolio | head
-docker compose logs sentiment | head
 ```
 
 Check:
 
-- The keeper banner shows `auth=private`, then a successful login. `auth=stub` means the private module was not loaded (check step 4, then rebuild).
+- The keeper banner shows `auth=private`, a masked username (two characters and `***`), then a successful login. `auth=stub` means the private module was not loaded (check step 4, then rebuild).
 - The portfolio banner shows `dry_run=True`.
-- The sentiment banner shows `provider=` with the value you chose.
+- The sentiment worker is not started by `--profile auto`. It is in profile `research` and the sleeve is off.
 
 ### 9. Update and stop (server)
 
@@ -256,7 +260,395 @@ Run `git checkout main` later to leave the detached state.
 - The gateway exits with code 132 or "Illegal instruction": the CPU lacks AVX2. Use the Java gateway.
 - `Pool overlaps` when compose creates the network: another Docker network uses 172.31.250.0/24. Change the subnet in `docker-compose.yml` and the allow pattern in `docker/gateway/conf.yaml` together. The tests check that they match.
 - Permission errors in `logs/`: `sudo chown 1000:1000 logs`.
-- Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt`. Add it and rebuild.
+- Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt` or `requirements-login.txt`. Add it and rebuild.
+- The keeper refuses to start and mentions `IBKR_PASSWORD`: remove `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` (and from the environment of the container). The login is read from `secrets/ibkr_login` only.
+- The keeper is locked out: see section 0B step 14.
+
+---
+
+## 0B. Phase 1 upgrade (paper account only)
+
+Upgrade an existing home-server stack to the Phase 1 code: the keeper logs in by itself through the gateway's login page, the gateway gets its own TLS key, the login moves out of `.env` into `secrets/`, Telegram alerts are added, and the sentiment sleeve is switched off. Paper account only. Nothing here sends orders: the portfolio stays in dry run, and this section never changes that.
+
+Read this first:
+
+- You run every step by hand over SSH on the Ubuntu server. Several checks below can only be confirmed on your server. Each one says what to look for and gives a safe fallback. Every fallback fails closed: nothing is exposed and nothing trades.
+- Do not skip a check. If one fails and its fallback is not enough, stop, run the stop command from step 3, and report the last log lines.
+- Do the first login on a weekday, outside 00:45 to 01:30 New York time, and not on a Saturday. The keeper waits in those windows.
+- A failed login is counted. A wrong password, a second-factor prompt or an unknown login page state locks the keeper out at once. So do three submitted attempts in 24 hours. It never retries by itself after that (see step 15).
+
+### 1. Back up first (server)
+
+Run the backup script, then keep a second copy of `.env` and the private files outside the repo:
+
+```bash
+cd ~/trading-bot
+deploy/backup.sh
+umask 077
+mkdir -p ~/backups/tradingbot/manual-$(date -u +%Y%m%d)
+cp .env ~/backups/tradingbot/manual-$(date -u +%Y%m%d)/
+cp core/ibkr_auth_private.py ~/backups/tradingbot/manual-$(date -u +%Y%m%d)/
+git rev-parse HEAD > ~/backups/tradingbot/manual-$(date -u +%Y%m%d)/commit.txt
+ls -l ~/backups/tradingbot/manual-$(date -u +%Y%m%d)/
+```
+
+If a `secrets/` folder already exists, copy it too with `cp -a secrets ~/backups/tradingbot/manual-$(date -u +%Y%m%d)/`. A first-time upgrade has none. If `core/ibkr_auth_private.py` does not exist, skip that `cp` line.
+
+Look for: the backup script prints the archive it wrote, and every file in the manual folder is mode `-rw-------`. The backup archive holds `logs/` (with the session cookie), so keep `~/backups/tradingbot/` private.
+
+### 2. Check memory and the current state (server)
+
+```bash
+free -m
+docker stats --no-stream
+docker compose --profile gateway --profile auto ps
+```
+
+Look for: about 3.6 GB available in `free -m`. The new memory limits add up to 2560m for the normal stack (gateway 768m, keeper 640m, portfolio 640m, dashboard 512m), and 2816m with the sentiment worker (256m). If much less than 3 GB is available, stop and report.
+
+### 3. Stop the stack (server)
+
+```bash
+docker compose --profile gateway --profile auto --profile research down
+```
+
+This is also the safe stop command for every later step. It keeps the `ibkr_gateway_tls` volume and your files.
+
+### 4. Update the code (server)
+
+```bash
+git fetch
+git checkout main
+git pull
+git status --short
+```
+
+Do this after the pull request is merged. Look for: no output from `git status --short`.
+
+### 5. Fetch the pinned gateway (server)
+
+The gateway image is built from a zip you fetch first. The Dockerfile no longer downloads anything.
+
+```bash
+scripts/fetch_gateway.sh
+git status --short
+```
+
+Check 3, the hash. Look for: a line starting with `OK:` and the file `vendor/ibkr-gateway/ibkr-gateway-linux-amd64.zip`. The script checks the zip against `docker/gateway/gateway.sha256`, and the image build checks it again. `git status --short` must print nothing, because `vendor/` is git-ignored.
+
+If it prints `SHA-256 mismatch`, the script deleted the download. Stop. Do not build. The file is not the pinned one, and the gateway handles your login session.
+
+If the build later says the `vendor` context is missing, you skipped this step.
+
+### 6. Create the secrets (server)
+
+```bash
+mkdir -p secrets
+chmod 700 secrets
+umask 077
+cp secrets/ibkr_login.example secrets/ibkr_login
+nano secrets/ibkr_login
+chmod 600 secrets/ibkr_login
+openssl rand -hex 24 > secrets/gateway_ssl_password
+sudo chown 10001:10001 secrets/gateway_ssl_password
+sudo chmod 600 secrets/gateway_ssl_password
+git check-ignore -v secrets/ibkr_login secrets/gateway_ssl_password
+```
+
+In `secrets/ibkr_login` put your paper username and password as `IBKR_USERNAME=...` and `IBKR_PASSWORD=...` lines. No quotes, no spaces around `=`, no other keys. `git check-ignore -v` must print the `.gitignore` rule for both files.
+
+Check 1, the keeper's user id. The keeper container runs as uid 1000 (`user: "1000:1000"` in `docker-compose.yml`, `useradd --uid 1000` in `docker/Dockerfile`). Compose file secrets keep the host owner and mode. `core/secret_store.py` refuses a file that is not owned by the reading uid, or that has any group or other permission.
+
+```bash
+id -u
+stat -c '%u:%g %a' secrets/ibkr_login
+```
+
+Look for: `1000` and `1000:1000 600`. If the file has another owner, run:
+
+```bash
+sudo chown 1000:1000 secrets/ibkr_login
+sudo chmod 600 secrets/ibkr_login
+```
+
+If your server user is not uid 1000, the `logs/` folder also needs that owner (see Troubleshooting). If the keeper must run as another uid on your host, change the uid in both `docker/Dockerfile` and `docker-compose.yml`, in one commit, and update the test that pins it. Do not loosen the file mode instead.
+
+Check 2, the gateway key password. The file must hold only letters and digits, 32 to 128 characters (`openssl rand -hex 24` gives 48). The gateway container runs as uid 10001 and must be able to read the file. With owner 10001 and mode 600, only that uid can read it. Your own user then needs `sudo` to read it, which is intended.
+
+```bash
+sudo stat -c '%u:%g %a' secrets/gateway_ssl_password
+sudo grep -Ecx '[0-9A-Za-z]{32,128}' secrets/gateway_ssl_password
+```
+
+Look for: `10001:10001 600`, then `1`. If the second command prints `0`, the file has the wrong characters or length: recreate it with `openssl rand -hex 24`. The gateway entrypoint checks this too, and exits with a clear message. If it says it cannot read the secret, the owner or mode is wrong. Do not make the file world readable to get around it.
+
+### 7. Update `.env` (server)
+
+```bash
+nano .env
+```
+
+- Delete the `IBKR_USERNAME` and `IBKR_PASSWORD` lines. The keeper refuses to start while `IBKR_PASSWORD` is set.
+- Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (create the bot with BotFather on your phone and send it one message first).
+- Leave `PAPER=true`, `DRY_RUN=true`, `IB_PORT=5000` and `DASHBOARD_HOST=127.0.0.1` as they are.
+- Leave `IBKR_LOGIN_SECRET_FILE` and `CPGW_CA_FILE` empty in Docker: compose sets the certificate path for the keeper and the portfolio runner.
+
+`.env` is loaded into every container, so the Telegram token is visible to all of them. It is not a broker secret, but keep `.env` mode 600.
+
+### 8. Private login module (server)
+
+```bash
+cp deploy/ibkr_auth_private.py.example core/ibkr_auth_private.py
+chmod 600 core/ibkr_auth_private.py
+git status --short
+```
+
+Look for: no output from `git status --short`. This replaces your old private login module. The new file holds no secret. It is wiring over the tracked `core/gateway_login.py`. If step 12 shows that the login page selectors differ, you override them in this file.
+
+### 9. Start the gateway and check it (server)
+
+The gateway must come up first. It writes its certificate into the `ibkr_gateway_tls` volume, and the keeper needs that certificate. This step covers checks 4 to 7.
+
+```bash
+docker compose --profile gateway up -d --build ibkr_gateway
+docker compose --profile gateway ps ibkr_gateway
+docker compose --profile gateway logs ibkr_gateway
+```
+
+Wait until `ps` shows `healthy`.
+
+Check 4, TLS from the generated keystore. The entrypoint creates the gateway's own RSA key and a PKCS12 keystore (alias `vertx`) and copies it to a file named `vertx.jks`. IBKR's default `vertx.jks` is deleted in the image, so the gateway cannot fall back to the public key. Whether the native gateway accepts a PKCS12 file under the name `vertx.jks` is not verified until now.
+
+```bash
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:5000/
+openssl s_client -connect 127.0.0.1:5000 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
+docker compose --profile gateway exec ibkr_gateway cat tls/cert.pem | openssl x509 -noout -fingerprint -sha256
+```
+
+Look for: a normal HTTP code (200 or 302, not `000`), and two identical SHA256 fingerprints. Identical means the gateway serves its own new certificate, not IBKR's default. If the container is unhealthy or restarts in a loop, TLS did not start. That fails closed: nothing is exposed. Run the stop command from step 3 and report the log lines. The fallback is a follow-up task, a real JKS keystore built with `keytool` in a one-off container. Do not bring back IBKR's default keystore.
+
+Check 5, the config paths. The entrypoint renders `docker/gateway/conf.yaml` into a tmpfs file and starts the gateway with `--conf ../run/conf.yaml`. The relative `sslCert: "vertx.jks"` is expected to resolve next to that file. Both are unverified for the pinned build, like `--conf` was in ADR 0001.
+
+Look for: no config, keystore or file-not-found error in `docker compose --profile gateway logs ibkr_gateway`, plus the check 4 results above. If the gateway ignores the config, it denies your requests (see check 6). If a path is wrong, it fails to start. Both fail closed. Stop and report.
+
+Check 6, the allow list. Docker's proxy delivers every connection to the published port from the bridge gateway address `172.31.250.1`, and the container's own healthcheck comes from `127.0.0.1`. The list allows exactly those two. The keeper runs on the host network and reaches the gateway at `127.0.0.1:5000`, so it arrives from `172.31.250.1` too.
+
+```bash
+curl -sk https://127.0.0.1:5000/ | head -c 300
+```
+
+Look for: login page HTML, not "Access Denied". If you see "Access Denied", the gateway log or its access output should show the source address. If that address is not `172.31.250.1`, stop. Widening the list to `172.31.250.*` is your own decision, not a step here. It means editing `docker/gateway/conf.yaml` and the test that pins the list, in a separate commit.
+
+Check 7, the certificate in the volume. The keeper reads `/app/gateway_tls/cert.pem` from the named volume. Compose prefixes the volume name with the project name (the folder name, so usually `trading-bot_ibkr_gateway_tls`).
+
+```bash
+docker compose --profile gateway exec ibkr_gateway ls -l tls
+docker volume ls | grep ibkr_gateway_tls
+```
+
+Look for: `cert.pem` (mode 644) and `keystore.p12` in the listing, and one volume whose name ends in `ibkr_gateway_tls`. Use the real name from the second command in any `docker volume` command. If the keeper starts before `cert.pem` exists, its login refuses to run (it fails closed). So always start the gateway first.
+
+If the entrypoint says the password does not match the keystore, you changed `secrets/gateway_ssl_password` after the first start. It never regenerates the key by itself. To start over, stop the gateway, remove the volume with `docker volume rm <real volume name>`, and start it again. That also makes a new certificate.
+
+Then repeat the check from section 0A step 5 on your laptop: the LAN and tailnet addresses on port 5000 must still fail to connect.
+
+### 10. Test Telegram (server)
+
+Check 12.
+
+```bash
+docker compose run --rm --no-deps portfolio python -m live.telegram_notifier --test
+echo $?
+```
+
+Look for: the text `telegram test message sent`, exit code 0, and one message on your phone that starts with `[tradingbot paper]`. `NOT sent` with exit code 1 means a wrong token or chat id, or no network. Fix `.env`. The notifier never raises, and its error text is redacted. The keeper and runners work without Telegram. You only lose the alerts.
+
+### 11. Build the stack and check sizes (server)
+
+```bash
+docker compose --profile gateway --profile auto build
+docker image ls | grep tradingbot
+```
+
+Look for: the keeper image `tradingbot-keeper:local` builds. It installs Playwright 1.55.0 and only Chromium's headless shell (`--only-shell chromium`), with no X server. Expect it to be roughly 300 to 450 MB larger than `tradingbot:local`. Note the real sizes and check the free disk with `df -h /var/lib/docker`.
+
+If the build fails while installing Chromium, it is most likely a network problem with Playwright's download. Run it again. The browser download is pinned only through the `playwright==1.55.0` version, not by file hash.
+
+### 12. Check the login page without logging in (server)
+
+Checks 8 and 9. This probe opens the gateway login page in the keeper's own headless Chromium and prints what it finds. It never types a username or password and never clicks, so it cannot burn a login attempt. It also shows whether Chromium honours the pinned certificate key. The browser starts with `--ignore-certificate-errors-spki-list=<pin>` for exactly one key (the gateway's own) and the code never turns off certificate checks.
+
+```bash
+docker compose --profile gateway --profile auto run --rm --no-deps -T cpgw_keeper python - <<'PY'
+from pathlib import Path
+from core.gateway_login import GatewayLoginConfig, playwright_page, spki_pin_from_pem
+
+cfg = GatewayLoginConfig.from_env()
+cfg = GatewayLoginConfig(base_url="https://127.0.0.1:5000", cert_file=cfg.cert_file)
+pin = spki_pin_from_pem(Path(cfg.cert_file).read_bytes())
+with playwright_page(cfg, pin) as page:
+    page.goto("https://127.0.0.1:5000/")
+    raw = page._page
+    print("url:", raw.url)
+    print("title:", raw.title())
+    for name in ("username_selector", "password_selector", "submit_selector"):
+        selector = getattr(cfg, name)
+        print(name, selector, "matches:", raw.locator(selector).count())
+    for html in raw.eval_on_selector_all("input,button", "els => els.map(e => e.outerHTML)"):
+        print(html[:200])
+PY
+```
+
+Look for:
+
+- No error. A `RuntimeError: navigation failed` means the page did not load. Either Chromium rejected the certificate (this headless shell did not honour the pin flag), or the gateway is down or denies the request. Check the gateway first (step 9). If `curl` works but the probe fails, the pin flag is the cause. That fails closed. Stop and report. The fix is a follow-up decision. Never switch to ignoring HTTPS errors.
+- `matches: 1` for each of the three selectors. The defaults in `core/gateway_login.py` are best guesses:
+  - username field: `input[name='username']`
+  - password field: `input[name='password']`
+  - submit button: `button[type='submit']`
+- The `outerHTML` lines show the real field names. Compare them with the defaults.
+
+The three result markers are texts that only appear after a submit, so no probe can check them safely:
+
+- success: `text=Client login succeeds`
+- bad credentials: `text=Invalid username password combination`
+- second factor: `text=Challenge`
+
+A wrong marker is safe but stops the keeper. Success is decided by the gateway API (`/iserver/auth/status`), not by page text, so a wrong success marker only costs up to the 30 second API wait. A wrong bad-credentials or second-factor marker ends as "needs a manual step", which locks the keeper out after that one attempt (see step 15). Nothing is retried.
+
+If a selector shows `matches: 0`, override it in the private file. Edit `core/ibkr_auth_private.py` (copied from `deploy/ibkr_auth_private.py.example`) and use a changed copy of the config, for example:
+
+```python
+import dataclasses
+
+from core.gateway_login import GatewayLoginConfig, login_via_gateway_page
+
+
+def login(creds, *, port, **kwargs):
+    config = dataclasses.replace(
+        GatewayLoginConfig.from_env(),
+        username_selector="input#user",
+    )
+    return login_via_gateway_page(
+        creds,
+        port=port,
+        config=config,
+        on_submit=kwargs.get("on_submit"),
+    )
+```
+
+`password_selector`, `submit_selector` and `markers` (a dict with the keys `success`, `bad_credentials` and `second_factor`) can be replaced the same way. Rebuild the keeper image after you edit the file (`docker compose --profile gateway --profile auto build cpgw_keeper`) and run the probe again until all three selectors match. Keep the file mode 600 and never commit it.
+
+### 13. First login, watched (server)
+
+Check 10 is part of this step.
+
+```bash
+docker compose --profile gateway --profile auto run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --once 2>&1 | tee /tmp/keeper_first_login.txt
+```
+
+Look for: a banner with `auth=private`, a masked username and `paper=True`, then `login OK, account=DU...` (a paper account id starts with `DU`). Telegram shows "login OK, session restored".
+
+Then the leak check. It counts the lines that contain your password in the keeper output, the event log and the keeper state. Process substitution keeps the password out of the command line and the shell history.
+
+```bash
+grep -c -F -f <(sed -n 's/^IBKR_PASSWORD=//p' secrets/ibkr_login) /tmp/keeper_first_login.txt
+grep -c -a -F -f <(sed -n 's/^IBKR_PASSWORD=//p' secrets/ibkr_login) logs/bot.sqlite logs/keeper_state.json
+rm /tmp/keeper_first_login.txt
+```
+
+Look for: `0` for the first command, and `0` for each file in the second. If any count is above 0, stop, change your IBKR password, and report it.
+
+Check 10, the empty cookie. The gateway may hold the session itself, so the browser may have no cookie to hand over. The keeper then confirms the login through `CPGWClient` with that empty cookie and the gateway's `auth/status`. The `login OK` line above is that confirmation. To see whether the cookie was empty:
+
+```bash
+python3 -c "import json; print(bool(json.load(open('logs/cpgw_session.json'))['cookie']))"
+```
+
+Either answer is fine. `False` means an empty cookie and a working login. If the keeper says `login finished but the gateway is not authenticated`, or fails after the form was submitted, that is a counted failed attempt. Read step 15 before you try again, and do not run the first login in a loop.
+
+If the keeper fails with `needs a manual step`, the selectors or markers do not match: go back to step 12. The keeper is then locked out and needs `--reset-lockout` (step 15).
+
+### 14. Start the stack and check it (server)
+
+```bash
+docker compose --profile gateway --profile auto up -d
+docker compose --profile gateway --profile auto ps
+docker stats --no-stream
+curl -fsS http://127.0.0.1:8765/api/health
+```
+
+Look for: every service running, each under its memory limit in `docker stats`, and the health answer with `"paper":true`, `"dry_run":true` and `"ib_port":5000`. The portfolio banner must show `dry_run=True`.
+
+Check 11, memory. Chromium peaks (roughly 250 to 400 MB) only while a login runs, then it closes. After a day, and after the first nightly gap, run:
+
+```bash
+docker stats --no-stream
+sudo journalctl -k --since "1 day ago" | grep -i oom
+```
+
+Look for: no service above about 80% of its limit, and no `oom` lines. An out-of-memory kill during a login still counts as a submitted attempt (it is recorded before the form is submitted), which is the safe side. If a service sits above 80%, raise its `mem_limit` and `memswap_limit` together in `docker-compose.yml` (they stay equal). A test pins these numbers, so update `tests/test_deploy_config.py` in the same commit. Training through the dashboard inside the 512m container is likely to be killed, so train out of band as before.
+
+### 15. Lockout: read it and reset it (server)
+
+Check 14. The keeper stops logging in, and keeps tickling, after a wrong password, a second-factor prompt, an unknown login page state, a non-paper account, or three submitted attempts in 24 hours. It sends a Telegram alert that says what is needed. The lockout is saved in `logs/keeper_state.json`, so a container restart does not clear it.
+
+Read the state:
+
+```bash
+python3 -m json.tool logs/keeper_state.json
+docker compose logs --tail 50 cpgw_keeper
+```
+
+Look for: `locked_out_reason` (`null` means not locked out), `failed_attempts` (timestamps of submitted attempts), `consecutive_failures`, `last_login_at` and `authenticated_since`. The file holds no secret. A corrupt state file also counts as locked out.
+
+Fix the cause first: the password in `secrets/ibkr_login`, the second factor on the IBKR account, the selectors from step 12, or the account itself. Then clear the lockout:
+
+```bash
+docker compose run --rm --no-deps cpgw_keeper python -m live.cpgw_keeper --reset-lockout
+docker compose --profile auto restart cpgw_keeper
+```
+
+The reset clears the reason and the failure counters and keeps the session times. If the cause is not fixed, the next attempt fails and counts again. If a wrong password was the cause, fix it on IBKR's own web site before you reset, because repeated bad passwords can lock the IBKR account itself.
+
+### 16. Sentiment check (server)
+
+Check 13. The sentiment sleeve is off (status `research`, allocation 0%), because Alpha Vantage `NEWS_SENTIMENT` is now a premium endpoint. The `sentiment` service moved to the compose profile `research` and does not start with `--profile auto`. You can still check that the data problem is reported loudly:
+
+```bash
+docker compose --profile research run --rm --no-deps sentiment python -m live.sentiment_worker --check
+echo $?
+```
+
+Look for: with `provider: alpha_vantage` and the premium endpoint, exit code 2 and one Telegram message of kind `health`. That proves the failure is loud. With the `stub` provider the exit code is 0 and it prints that there is nothing to check. The check writes no sentiment rows.
+
+### 17. Watch the first days (server)
+
+Watch the dashboard events and Telegram for the first night (the gap around 01:00 New York time), the first Saturday, and the first 24 hour reset. Expect an info alert in each case, not a lockout. The portfolio runner sends one Telegram message per order (tagged `[DRY-RUN]`) and a daily summary after 17:00 New York time.
+
+### 18. Rollback (server)
+
+Check 15.
+
+```bash
+cd ~/trading-bot
+docker compose --profile gateway --profile auto --profile research down
+git checkout <commit from step 1>
+cp ~/backups/tradingbot/manual-<date>/.env .env
+cp ~/backups/tradingbot/manual-<date>/ibkr_auth_private.py core/ibkr_auth_private.py
+chmod 600 .env core/ibkr_auth_private.py
+docker compose --profile gateway --profile auto up -d --build
+```
+
+Use the folder date and commit hash from step 1. The old code ignores `secrets/`, `vendor/` and the `ibkr_gateway_tls` volume, so they can stay. If you went back to the host Java gateway, follow the Rollback in section 0A instead. Run `git checkout main` later to leave the detached state.
+
+### Known limits
+
+- The dashboard can start the keeper, the runners and the sentiment worker as subprocesses inside its own container. That container has no `CPGW_CA_FILE`, no login secret and no Chromium. A keeper started there cannot log in, and a runner started there does not verify the gateway certificate. Run the workers as compose services. Do not rely on the dashboard control page for the keeper.
+- Two keepers (one from the dashboard, one from the container) are not supported. The lockout file blocks both, but they would still compete for the session.
+- The Telegram token in `.env` is visible to every container. A token-file variant is a follow-up.
+- The Chromium sandbox is off (Playwright's default `chromiumSandbox: false`), because Docker blocks the user namespaces it needs. The browser only opens the local gateway address, and every other address is blocked.
+- `logs/cpgw_session.json` can hold a session cookie and is in the nightly backup. Protect the backup folder.
 
 ---
 
@@ -274,14 +666,12 @@ cp .env.example .env
 $EDITOR .env
 ```
 
-`.env` should have:
+`.env` should have (the IBKR login does not go here: it is the file `secrets/ibkr_login`, see section 0B):
 ```
 PAPER=true
 IB_HOST=localhost
 IB_PORT=5000
 IB_CLIENT_ID=0
-IBKR_USERNAME=your_ibkr_login
-IBKR_PASSWORD=your_ibkr_password
 EMAIL_USER=you@gmail.com
 EMAIL_PASS=<16-char gmail app password>
 EMAIL_RECIPIENTS=you@gmail.com

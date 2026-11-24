@@ -356,3 +356,23 @@ def test_env_example_has_no_password_and_lists_the_new_variables():
         "CPGW_CA_FILE=",
     ):
         assert expected in lines
+
+
+def _phase1_section() -> str:
+    text = _read("deploy/README.md")
+    match = re.search(r"^## [^\n]*Phase 1 upgrade \(paper account only\)[^\n]*$", text, re.M)
+    assert match, "deploy/README.md has no Phase 1 upgrade section"
+    rest = text[match.end() :]
+    nxt = re.search(r"^## ", rest, re.M)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_phase1_section_starts_with_a_backup_and_never_uses_live():
+    section = _phase1_section()
+    first_compose = section.find("docker compose")
+    assert first_compose != -1
+    backup = section.find("deploy/backup.sh")
+    assert backup != -1 and backup < first_compose
+    assert "--live" not in section
+    assert "uv run" not in section and "uv sync" not in section
+    assert "—" not in section and "–" not in section
