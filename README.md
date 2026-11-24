@@ -133,15 +133,24 @@ python -m backtest.run               # add --refresh to download everything agai
 ## Run it
 
 ```sh
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt            # add requirements-train.txt to train models
-cp .env.example .env                       # fill in your own values
+# Setup. macOS/Linux shown; on Windows use .venv\Scripts\python and .venv\Scripts\ruff
+uv venv --python 3.11
+uv pip install -r requirements.txt          # add requirements-train.txt to train models
+uv pip install -r requirements-dev.txt      # pytest and ruff
+cp .env.example .env                        # fill in your own values
 
-python -m live.portfolio_runner --once     # one dry-run cycle of every enabled sleeve
-uvicorn dashboard.app:app --host 127.0.0.1 --port 8765   # dashboard
-python -m backtest.run                                   # core sleeve backtest (needs requirements-backtest.txt)
-docker compose --profile auto up -d        # or everything in Docker
+.venv/bin/python -m live.portfolio_runner --once                             # one dry-run cycle of every enabled sleeve
+.venv/bin/python -m uvicorn dashboard.app:app --host 127.0.0.1 --port 8765   # dashboard
+.venv/bin/python -m backtest.run                                             # core sleeve backtest (needs requirements-backtest.txt)
+docker compose --profile auto up -d                                          # or everything in Docker
+
+# Lint and tests (what CI runs)
+.venv/bin/ruff format --check .
+.venv/bin/ruff check .
+.venv/bin/python -m pytest -q
 ```
+
+Use `python -m uvicorn` so the dashboard runs on the venv interpreter (it starts workers with `sys.executable`).
 
 ## Stack
 
