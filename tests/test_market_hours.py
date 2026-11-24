@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
-from core.market_hours import nyse_calendar, to_eastern
+from core.market_hours import (
+    MarketRegime,
+    market_state,
+    nyse_calendar,
+    should_run_entries,
+    should_run_exits,
+    to_eastern,
+)
 
 
 def _close_utc(day: str) -> datetime:
@@ -87,3 +94,83 @@ def test_to_eastern_naive_input_is_utc():
 def test_to_eastern_aware_non_utc_input():
     plus_two = timezone(timedelta(hours=2))
     assert to_eastern(datetime(2026, 11, 1, 8, 30, tzinfo=plus_two)) == datetime(2026, 11, 1, 1, 30)
+
+
+def _utc(*args) -> datetime:
+    return datetime(*args, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        _utc(2026, 11, 26, 15),  # Thanksgiving 10:00 ET
+        _utc(2026, 11, 26, 12),  # Thanksgiving 07:00 ET, not PRE_OPEN
+        _utc(2026, 11, 26, 23),  # Thanksgiving evening, not AFTER_CLOSE
+        _utc(2026, 4, 3, 15),  # Good Friday
+        _utc(2026, 7, 3, 14),  # Independence Day observed
+        _utc(2026, 12, 25, 15),  # Christmas
+    ],
+)
+def test_weekday_holiday_is_holiday_regime(now):
+    ms = market_state(now)
+    assert ms.regime == MarketRegime.HOLIDAY
+    assert ms.is_open is False
+    assert ms.is_weekend is False
+    assert ms.minutes_to_close is None
+    assert ms.minutes_to_open > 0
+
+
+def test_thanksgiving_minutes_to_open():
+    assert market_state(_utc(2026, 11, 26, 15)).minutes_to_open == 1410
+
+
+def test_early_close_open_until_real_close():
+    ms = market_state(_utc(2026, 11, 27, 17, 30))  # Fri 12:30 ET
+    assert ms.regime == MarketRegime.OPEN
+    assert ms.minutes_to_close == 30
+    assert ms.minutes_to_open is None
+
+
+def test_early_close_after_close_starts_at_13():
+    ms = market_state(_utc(2026, 11, 27, 18, 30))  # Fri 13:30 ET
+    assert ms.regime == MarketRegime.AFTER_CLOSE
+    assert ms.minutes_to_open == 4080
+
+
+def test_christmas_eve_early_close_boundary():
+    last = market_state(_utc(2026, 12, 24, 17, 59))
+    assert last.regime == MarketRegime.OPEN
+    assert last.minutes_to_close == 1
+    assert market_state(_utc(2026, 12, 24, 18, 0)).regime == MarketRegime.AFTER_CLOSE
+
+
+def test_eve_of_holiday_after_close_counts_to_next_session():
+    ms = market_state(_utc(2026, 11, 25, 22))  # Wed 17:00 ET
+    assert ms.regime == MarketRegime.AFTER_CLOSE
+    assert ms.minutes_to_open == 2430
+
+
+def test_minutes_to_open_is_real_elapsed_across_dst_weekends():
+    assert market_state(_utc(2026, 3, 7, 17)).minutes_to_open == 2670
+    assert market_state(_utc(2026, 10, 31, 16)).minutes_to_open == 2790
+
+
+def test_normal_friday_regression():
+    open_ms = market_state(_utc(2026, 11, 13, 15))
+    assert open_ms.regime == MarketRegime.OPEN
+    assert open_ms.minutes_to_close == 360
+    pre = market_state(_utc(2026, 11, 13, 14))
+    assert pre.regime == MarketRegime.PRE_OPEN
+    assert pre.minutes_to_open == 30
+
+
+def test_weekend_stays_weekend():
+    ms = market_state(_utc(2026, 11, 14, 15))
+    assert ms.regime == MarketRegime.WEEKEND
+    assert ms.is_weekend is True
+
+
+def test_holiday_gating_entries_off_exits_on():
+    ms = market_state(_utc(2026, 11, 26, 15))
+    assert should_run_entries(ms) is False
+    assert should_run_exits(ms) is True

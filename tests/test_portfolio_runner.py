@@ -207,3 +207,32 @@ def test_runner_passes_cooldown_to_sleeves(tmp_path, monkeypatch):
 
     assert r.core.reentry_cooldown_sec == 12345
     assert r.satellite.reentry_cooldown_sec == 12345
+
+
+THANKSGIVING = datetime(2026, 11, 26, 15, tzinfo=timezone.utc)  # Thu 10:00 EST, closed
+
+
+def test_core_cycle_skips_on_a_holiday(tmp_path):
+    r = make_runner(tmp_path, ranked_closes())
+    ms = market_state(THANKSGIVING)
+
+    r._cycle_core("c1", 100_000.0, ms, THANKSGIVING)
+
+    with sqlite3.connect(tmp_path / "bot.sqlite") as c:
+        events = [row[0] for row in c.execute("SELECT message FROM events")]
+        targets = c.execute("SELECT COUNT(*) FROM targets").fetchone()[0]
+    assert any("skip (holiday" in m for m in events)
+    assert targets == 0
+    assert r.storage.recent_orders() == []
+
+
+def test_satellite_cycle_opens_nothing_on_a_holiday(tmp_path):
+    r = make_runner(tmp_path, {"AAPL": linear_closes(100.0, 0.0, 5)})
+    r.storage.log_sentiment(symbol="AAPL", source="test", score=0.9, article_count=10)
+    ms = market_state(THANKSGIVING)
+
+    r._cycle_satellite("c1", 100_000.0, ms, THANKSGIVING)
+
+    buys = [o for o in r.storage.recent_orders() if o["action"] == "BUY"]
+    assert buys == []
+    assert r.storage.get_holdings("sentiment") == []
