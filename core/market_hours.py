@@ -1,33 +1,33 @@
 """
 US equity market hours awareness.
 
-Used by the portfolio runner to decide what to do per cycle:
-  - DURING MARKET HOURS (Mon–Fri 09:30–16:00 ET):
-      full evaluation — core scoring, sentiment entries, stops, exits
-  - AFTER CLOSE (16:00-23:59 ET):
+Used by the portfolio runner to decide what to do per cycle. The schedule comes
+from the NYSE (XNYS) calendar of exchange_calendars: weekends, full-day
+holidays and early closes (13:00 ET) are all handled.
+  - DURING MARKET HOURS (session open to session close, normally 09:30-16:00 ET):
+      full evaluation: core scoring, sentiment entries, stops, exits
+  - AFTER CLOSE (session close to midnight ET):
       the runner still evaluates core (it works on the just-closed bars).
       The core sleeve itself decides whether to act: at most once per day,
-      on its rebalance weekday or on drift. PRE_OPEN and weekends are skipped.
-  - WEEKENDS / OTHER OFF-HOURS:
-      time-based satellite exits only (the 10-day timer doesn't care if
-      the market is open — but we won't try to PLACE the exit order until
-      Monday open). Everything else is a no-op.
-
-Holidays are NOT handled yet. NYSE has ~9 full closures + ~3 early closes per
-year. If we trade for a year and never hit a Thanksgiving false-evaluation, we
-got lucky. TODO Phase 9: pull NYSE calendar from pandas_market_calendars.
+      on its rebalance weekday or on drift. PRE_OPEN, WEEKEND and HOLIDAY
+      are skipped by the core sleeve.
+  - WEEKENDS / HOLIDAYS:
+      time-based satellite exits only (the hold timer doesn't care if
+      the market is open, but we won't try to PLACE the exit order until
+      the next open). Everything else is a no-op.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
+import pandas as pd
 
 _EASTERN = ZoneInfo("America/New_York")
 
@@ -62,10 +62,11 @@ def nyse_calendar() -> xcals.ExchangeCalendar:
 
 
 class MarketRegime(Enum):
-    OPEN = "open"  # Mon–Fri 09:30–16:00 ET
-    PRE_OPEN = "pre_open"  # Mon–Fri 00:00–09:30 ET
-    AFTER_CLOSE = "after_close"  # Mon–Fri 16:00–23:59 ET
+    OPEN = "open"  # session open to session close
+    PRE_OPEN = "pre_open"  # session day, midnight ET to the open
+    AFTER_CLOSE = "after_close"  # session day, close to midnight ET
     WEEKEND = "weekend"  # Sat / Sun
+    HOLIDAY = "holiday"  # weekday with no NYSE session
 
 
 @dataclass
@@ -74,64 +75,54 @@ class MarketState:
     eastern_now: datetime
     weekday: int  # 0=Mon..6=Sun
     is_open: bool  # convenience
-    is_weekend: bool
+    is_weekend: bool  # Saturday or Sunday only
     minutes_to_open: Optional[int]  # None if currently open
     minutes_to_close: Optional[int]  # None if not currently open
 
 
-_OPEN_TIME = time(9, 30)
-_CLOSE_TIME = time(16, 0)
+def _minutes(delta: timedelta) -> int:
+    return int(delta.total_seconds() // 60)
 
 
 def market_state(now_utc: Optional[datetime] = None) -> MarketState:
-    """Where in the market schedule are we right now? (or at a given UTC time.)"""
+    """Where in the market schedule are we right now? (or at a given UTC time.)
+
+    Minutes are real elapsed minutes (computed in UTC), so they are correct
+    across DST changes, holidays and early closes."""
     now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
     et = to_eastern(now_utc)
     wd = et.weekday()
-    is_weekend = wd >= 5
+    cal = nyse_calendar()
+    day = pd.Timestamp(et.date())
 
-    if is_weekend:
-        regime = MarketRegime.WEEKEND
-        is_open = False
-        # Minutes until Monday 09:30 ET
-        days_to_monday = 7 - wd
-        next_open = et.replace(hour=9, minute=30, second=0, microsecond=0) + timedelta(
-            days=days_to_monday
-        )
-        minutes_to_open = int((next_open - et).total_seconds() // 60)
-        minutes_to_close = None
-    else:
-        t = et.time()
-        if t < _OPEN_TIME:
+    minutes_to_open: Optional[int] = None
+    minutes_to_close: Optional[int] = None
+    if cal.is_session(day):
+        open_utc = cal.session_open(day).to_pydatetime()
+        close_utc = cal.session_close(day).to_pydatetime()
+        if now_utc < open_utc:
             regime = MarketRegime.PRE_OPEN
-            is_open = False
-            opens = et.replace(hour=9, minute=30, second=0, microsecond=0)
-            minutes_to_open = int((opens - et).total_seconds() // 60)
-            minutes_to_close = None
-        elif t < _CLOSE_TIME:
+            minutes_to_open = _minutes(open_utc - now_utc)
+        elif now_utc < close_utc:
             regime = MarketRegime.OPEN
-            is_open = True
-            closes = et.replace(hour=16, minute=0, second=0, microsecond=0)
-            minutes_to_open = None
-            minutes_to_close = int((closes - et).total_seconds() // 60)
+            minutes_to_close = _minutes(close_utc - now_utc)
         else:
             regime = MarketRegime.AFTER_CLOSE
-            is_open = False
-            # Minutes until tomorrow 09:30 ET (or Monday if Friday)
-            if wd == 4:  # Friday after close
-                next_open_day = et + timedelta(days=3)
-            else:
-                next_open_day = et + timedelta(days=1)
-            opens = next_open_day.replace(hour=9, minute=30, second=0, microsecond=0)
-            minutes_to_open = int((opens - et).total_seconds() // 60)
-            minutes_to_close = None
+            next_open = cal.session_open(cal.next_session(day)).to_pydatetime()
+            minutes_to_open = _minutes(next_open - now_utc)
+    else:
+        regime = MarketRegime.WEEKEND if wd >= 5 else MarketRegime.HOLIDAY
+        next_open = cal.session_open(cal.date_to_session(day, direction="next")).to_pydatetime()
+        minutes_to_open = _minutes(next_open - now_utc)
 
     return MarketState(
         regime=regime,
         eastern_now=et,
         weekday=wd,
-        is_open=is_open,
-        is_weekend=is_weekend,
+        is_open=regime == MarketRegime.OPEN,
+        is_weekend=wd >= 5,
         minutes_to_open=minutes_to_open,
         minutes_to_close=minutes_to_close,
     )

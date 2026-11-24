@@ -222,6 +222,10 @@ class PortfolioRunner:
             mkt_note = (
                 f"WEEKEND (next open in {ms.minutes_to_open // 60}h, ET {ms.eastern_now:%a %H:%M})"
             )
+        elif ms.regime == MarketRegime.HOLIDAY:
+            mkt_note = (
+                f"HOLIDAY (next open in {ms.minutes_to_open // 60}h, ET {ms.eastern_now:%a %H:%M})"
+            )
         elif ms.regime == MarketRegime.PRE_OPEN:
             mkt_note = f"PRE-OPEN ({ms.minutes_to_open}m to open, ET {ms.eastern_now:%H:%M %a})"
         else:
@@ -234,7 +238,7 @@ class PortfolioRunner:
             self._cycle_satellite(cycle_id, total_equity, ms, now)
 
         # ----- Core sleeve -----
-        # Evaluated in OPEN and AFTER_CLOSE cycles (never WEEKEND or PRE_OPEN).
+        # Evaluated in OPEN and AFTER_CLOSE cycles (never WEEKEND, HOLIDAY or PRE_OPEN).
         # The sleeve decides: rebalance weekday, or drift.
         if self.core is not None:
             self._cycle_core(cycle_id, total_equity, ms, now)
@@ -250,9 +254,9 @@ class PortfolioRunner:
         assert self.client is not None and self.core is not None
         sleeve_equity = total_equity * self.core_cfg.allocation_pct
 
-        # Market-hours gate: skip weekends and pre-open. Calendar and drift
+        # Market-hours gate: skip weekends, holidays and pre-open. Calendar and drift
         # triggers are decided by the sleeve's should_evaluate.
-        if ms.regime in (MarketRegime.WEEKEND, MarketRegime.PRE_OPEN):
+        if ms.regime in (MarketRegime.WEEKEND, MarketRegime.HOLIDAY, MarketRegime.PRE_OPEN):
             self.storage.log_event(
                 "info",
                 "core",
