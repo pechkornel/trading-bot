@@ -150,9 +150,9 @@ def decide(
     if until is not None:
         return Action(ActionKind.WAIT, until=until, reason="window")
 
-    if state.consecutive_failures > 0 and state.last_attempt_at is not None:
+    if state.last_attempt_at is not None:
         retry_at = state.last_attempt_at + timedelta(
-            seconds=backoff_delay_sec(state.consecutive_failures, cfg)
+            seconds=backoff_delay_sec(max(state.consecutive_failures, 1), cfg)
         )
         if now < retry_at:
             return Action(ActionKind.WAIT, until=retry_at, reason="backoff")
@@ -171,6 +171,8 @@ def record_submit(state: KeeperState, now: datetime) -> None:
     del state.failed_attempts[:-_MAX_TRACKED_ATTEMPTS]
     state.submit_times.append(now)
     del state.submit_times[:-_MAX_TRACKED_SUBMITS]
+    # Backoff must hold after a crash mid-login too, when no failure is ever recorded.
+    state.last_attempt_at = now
 
 
 def record_login_failure(

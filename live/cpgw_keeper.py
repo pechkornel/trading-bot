@@ -431,9 +431,17 @@ class Keeper:
         self._full_login(now)
 
     def _on_submit(self) -> None:
-        """Called by the login flow right before the form is submitted."""
+        """Called by the login flow right before the form is submitted.
+
+        A failed save raises, so the form is never submitted without a durable record."""
         policy.record_submit(self.state, self._clock())
-        self._save()
+        try:
+            policy.save_state(self.state_path, self.state)
+        except OSError as exc:
+            self._event("error", f"cannot save keeper state before login: {type(exc).__name__}")
+            raise IBKRAuthError(
+                "cannot record the login attempt, so no login was submitted"
+            ) from None
 
     def _full_login(self, now: datetime) -> None:
         try:
