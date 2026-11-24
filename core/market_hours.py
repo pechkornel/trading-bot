@@ -25,43 +25,21 @@ from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
 
-# US Eastern is UTC-5 (EST) or UTC-4 (EDT). Python's stdlib doesn't ship full
-# tz data on all platforms; we approximate by detecting DST manually. For our
-# use case (gating evaluations), being off by one hour around DST flips is fine.
-
-
-# DST in the US: second Sunday of March through first Sunday of November.
-def _us_eastern_offset(utc_now: datetime) -> timedelta:
-    """Return offset to apply to UTC to get US Eastern time."""
-    year = utc_now.year
-    # Second Sunday of March
-    dst_start = _nth_weekday(year, 3, 6, 2)  # March, Sunday, 2nd occurrence
-    # First Sunday of November
-    dst_end = _nth_weekday(year, 11, 6, 1)
-    # DST window is [dst_start 02:00 ET, dst_end 02:00 ET]
-    # Approximate: just compare dates (off-by-one-hour around the flip is fine for us)
-    in_dst = dst_start.date() <= utc_now.date() < dst_end.date()
-    return timedelta(hours=-4 if in_dst else -5)
-
-
-def _nth_weekday(year: int, month: int, weekday: int, n: int) -> datetime:
-    """Nth occurrence of weekday in given year/month. weekday: 0=Mon..6=Sun."""
-    d = datetime(year, month, 1)
-    # Days to advance to first matching weekday
-    days_ahead = (weekday - d.weekday()) % 7
-    first = d + timedelta(days=days_ahead)
-    return first + timedelta(days=7 * (n - 1))
+_EASTERN = ZoneInfo("America/New_York")
 
 
 def to_eastern(utc: datetime) -> datetime:
-    """Convert a UTC datetime to US Eastern (naive). Use only for display + gating."""
+    """Convert a datetime to US Eastern wall-clock time (naive).
+
+    Naive input is treated as UTC. Aware input is converted. Uses the IANA zone,
+    so the result is correct at DST changes. Use only for display + gating."""
     if utc.tzinfo is None:
         utc = utc.replace(tzinfo=timezone.utc)
-    et = utc.astimezone(timezone.utc) + _us_eastern_offset(utc)
-    return et.replace(tzinfo=None)
+    return utc.astimezone(_EASTERN).replace(tzinfo=None)
 
 
 # ---- NYSE calendar ----
