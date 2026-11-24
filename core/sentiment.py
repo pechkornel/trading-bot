@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -59,12 +61,23 @@ class StubProvider:
 # ---------- Alpha Vantage ----------
 
 
+def _time_from(now: datetime, lookback_hours: int) -> str:
+    """Alpha Vantage `time_from` value: UTC, YYYYMMDDTHHMM, `lookback_hours` before `now`."""
+    if now.tzinfo is None:
+        raise ValueError("clock must return a timezone-aware datetime")
+    start = now.astimezone(timezone.utc) - timedelta(hours=lookback_hours)
+    return start.strftime("%Y%m%dT%H%M")
+
+
 class AlphaVantageProvider:
     """
     Alpha Vantage News & Sentiment API.
 
     Endpoint:
-        https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=SPY,AAPL&apikey=...
+        https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=SPY,AAPL&time_from=20261123T1230&apikey=...
+
+    `time_from` is `lookback_hours` before now (UTC). `lookback_hours=None` omits it.
+    `clock` returns the current aware datetime (injectable for tests).
 
     Response shape (relevant fields):
         {
@@ -94,14 +107,22 @@ class AlphaVantageProvider:
     BASE_URL = "https://www.alphavantage.co/query"
     TIMEOUT_SEC = 30.0
 
-    def __init__(self, api_key: str | None = None, lookback_hours: int = 6) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        lookback_hours: int | None = 24,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("ALPHA_VANTAGE_API_KEY")
         if not self.api_key:
             raise ValueError(
                 "Alpha Vantage requires ALPHA_VANTAGE_API_KEY in env or constructor. "
                 "Get a free key at https://www.alphavantage.co/support/#api-key"
             )
+        if lookback_hours is not None and lookback_hours <= 0:
+            raise ValueError("lookback_hours must be positive, or None to omit time_from")
         self.lookback_hours = lookback_hours
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def fetch_batch(self, symbols: list[str]) -> list[SentimentReading]:
         if not symbols:
@@ -112,6 +133,8 @@ class AlphaVantageProvider:
             "limit": "100",  # max items per call
             "apikey": self.api_key,
         }
+        if self.lookback_hours is not None:
+            params["time_from"] = _time_from(self._clock(), self.lookback_hours)
         url = f"{self.BASE_URL}?{urlencode(params)}"
         req = Request(url, headers={"User-Agent": "tradingbot/1.0"})
         try:

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import URLError
 
@@ -149,3 +150,58 @@ def test_null_feed_gives_zero_readings(monkeypatch):
 @pytest.mark.parametrize("raw, expected", [(0.25, 0.5), (0.8, 1.0), (-0.9, -1.0)])
 def test_normalize(raw, expected):
     assert AlphaVantageProvider._normalize(raw) == pytest.approx(expected)
+
+
+# ---- lookback_hours / time_from ----
+
+NOW = datetime(2026, 11, 24, 12, 30, 45, tzinfo=timezone.utc)
+
+
+def clocked(**kwargs) -> AlphaVantageProvider:
+    return AlphaVantageProvider(api_key="test-key", clock=lambda: NOW, **kwargs)
+
+
+def test_time_from_is_sent_in_utc(monkeypatch):
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    clocked(lookback_hours=6).fetch_batch(["AAPL"])
+    assert "time_from=20261124T0630" in fake.requests[0].full_url
+
+
+def test_time_from_converts_aware_clock_to_utc(monkeypatch):
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    cest = timezone(timedelta(hours=2))
+    p = AlphaVantageProvider(
+        api_key="test-key",
+        lookback_hours=6,
+        clock=lambda: NOW.astimezone(cest),
+    )
+    p.fetch_batch(["AAPL"])
+    assert "time_from=20261124T0630" in fake.requests[0].full_url
+
+
+def test_default_lookback_is_24_hours(monkeypatch):
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    p = clocked()
+    assert p.lookback_hours == 24
+    p.fetch_batch(["AAPL"])
+    assert "time_from=20261123T1230" in fake.requests[0].full_url
+
+
+def test_lookback_none_omits_time_from(monkeypatch):
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    clocked(lookback_hours=None).fetch_batch(["AAPL"])
+    assert "time_from" not in fake.requests[0].full_url
+
+
+def test_naive_clock_raises_value_error(monkeypatch):
+    fake = patch_urlopen(monkeypatch, payload={"feed": []})
+    p = AlphaVantageProvider(api_key="test-key", clock=lambda: datetime(2026, 11, 24, 12, 0))
+    with pytest.raises(ValueError):
+        p.fetch_batch(["AAPL"])
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize("hours", [0, -1])
+def test_non_positive_lookback_raises_value_error(hours):
+    with pytest.raises(ValueError):
+        AlphaVantageProvider(api_key="test-key", lookback_hours=hours)
