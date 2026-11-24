@@ -88,6 +88,21 @@ class PortfolioConfig:
     starting_equity: float = 100_000.0
     cycle_interval_sec: int = 60
     reentry_cooldown_sec: int = 86400
+    # Use the paper account's net liquidation as total equity when it is valid.
+    # starting_equity stays the fallback and the anchor of the sanity range.
+    use_account_equity: bool = True
+    equity_min_ratio: float = 0.25
+    equity_max_ratio: float = 4.0
+    equity_currency: str = "USD"
+
+    def __post_init__(self) -> None:
+        if not self.starting_equity > 0:
+            raise ValueError(f"starting_equity must be > 0, got {self.starting_equity}")
+        if not (0 < self.equity_min_ratio <= 1 <= self.equity_max_ratio):
+            raise ValueError(
+                "equity ratios must satisfy 0 < equity_min_ratio <= 1 <= equity_max_ratio, "
+                f"got {self.equity_min_ratio} and {self.equity_max_ratio}"
+            )
 
 
 @dataclass
