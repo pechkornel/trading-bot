@@ -213,3 +213,31 @@ def test_import_does_not_import_yfinance():
     code2 = "import sys, backtest.data; print('yfinance' in sys.modules)"
     out2 = subprocess.run([sys.executable, "-c", code2], capture_output=True, text=True, check=True)
     assert out2.stdout.strip() == "False"
+
+
+class TailNaNFakes(Fakes):
+    """Yahoo returns a placeholder row with NaN prices for the unfinished latest day."""
+
+    def __init__(self, nan_at: int = -1):
+        super().__init__()
+        self.nan_at = nan_at
+
+    def fetch_yahoo(self, ticker: str) -> pd.DataFrame:
+        df = super().fetch_yahoo(ticker).copy()
+        df.iloc[self.nan_at] = float("nan")
+        return df
+
+
+def test_trailing_nan_row_is_dropped_and_not_cached(tmp_path):
+    data = _load(tmp_path, TailNaNFakes(nan_at=-1))
+
+    assert len(data.raw_close) == 4
+    assert not data.raw_close.isna().any().any()
+    assert not data.adj_close.isna().any().any()
+    cached = pd.read_csv(tmp_path / "yahoo" / "SPY.csv")
+    assert len(cached) == 4
+
+
+def test_nan_inside_the_series_is_still_an_error(tmp_path):
+    with pytest.raises(DataError, match="SPY: missing"):
+        _load(tmp_path, TailNaNFakes(nan_at=2), tickers=("SPY",))
