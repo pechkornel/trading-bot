@@ -16,7 +16,7 @@ from live.account_equity import (
 )
 
 ACCOUNT = "DU0000000"
-RANGE_TEXT = "outside 25,000.00 to 400,000.00 (0.25x to 4x starting_equity)"
+RANGE_TEXT = "outside 25,000.00 to 200,000.00 (0.25x to 2x starting_equity)"
 
 
 class FakeAccountClient:
@@ -149,10 +149,10 @@ def test_above_max_ratio_and_million_rejected(cfg):
         resolve_total_equity(FakeAccountClient(nl(1_000_000)), cfg),
         f"net liquidation 1,000,000.00 {RANGE_TEXT}",
     )
-    assert resolve_total_equity(FakeAccountClient(nl(400_000.01)), cfg).source == "starting_equity"
+    assert resolve_total_equity(FakeAccountClient(nl(200_000.01)), cfg).source == "starting_equity"
 
 
-@pytest.mark.parametrize("value", [25_000.0, 400_000.0])
+@pytest.mark.parametrize("value", [25_000.0, 200_000.0])
 def test_bounds_inclusive(cfg, value):
     r = resolve_total_equity(FakeAccountClient(nl(value)), cfg)
     assert r.source == "gateway"
@@ -256,3 +256,46 @@ def test_disabled_ignores_last_reading():
     cfg = PortfolioConfig(use_account_equity=False)
     r = resolve_total_equity(FakeAccountClient(nl()), cfg, last_reading(), NOW)
     assert r.source == "starting_equity"
+
+
+def test_default_max_ratio_rejects_3x_starting_equity(cfg):
+    assert cfg.equity_max_ratio == 2.0
+    r = resolve_total_equity(FakeAccountClient(nl(300_000.0)), cfg)
+    assert r.source == "starting_equity"
+    assert "outside" in r.reason
+
+
+def test_step_over_max_is_rejected_and_last_reading_used(cfg):
+    last = last_reading(60_000.0)
+    r = resolve_total_equity(FakeAccountClient(nl(78_000.0)), cfg, last, NOW)  # +30%
+    assert r.source == "last_gateway"
+    assert r.equity == 60_000.0
+    assert r.reason == f"net liquidation moved more than 25% since {last.ts.isoformat()}"
+
+
+def test_step_down_over_max_is_rejected(cfg):
+    r = resolve_total_equity(FakeAccountClient(nl(40_000.0)), cfg, last_reading(60_000.0), NOW)
+    assert r.source == "last_gateway"
+    assert "moved more than 25%" in r.reason
+
+
+def test_step_within_max_is_accepted(cfg):
+    r = resolve_total_equity(FakeAccountClient(nl(72_000.0)), cfg, last_reading(60_000.0), NOW)
+    assert r.source == "gateway"  # +20%
+    assert r.equity == 72_000.0
+
+
+def test_no_history_means_range_check_only(cfg):
+    r = resolve_total_equity(FakeAccountClient(nl(190_000.0)), cfg, None, NOW)
+    assert r.source == "gateway"
+
+
+def test_step_check_ignored_when_last_reading_is_too_old(cfg):
+    old = last_reading(60_000.0, age_sec=cfg.equity_last_max_age_sec + 1)
+    r = resolve_total_equity(FakeAccountClient(nl(90_000.0)), cfg, old, NOW)
+    assert r.source == "gateway"
+
+
+def test_equity_max_step_must_be_positive():
+    with pytest.raises(ValueError, match="equity_max_step"):
+        PortfolioConfig(equity_max_step=0)
