@@ -93,3 +93,54 @@ def test_portfolio_config_default_cooldown_matches_yaml():
 
 def test_loaded_portfolio_cooldown_is_one_day():
     assert load_portfolio().reentry_cooldown_sec == 86400
+
+
+def test_portfolio_config_account_equity_defaults():
+    cfg = PortfolioConfig()
+    assert cfg.use_account_equity is True
+    assert cfg.equity_min_ratio == 0.25
+    assert cfg.equity_max_ratio == 4.0
+    assert cfg.equity_currency == "USD"
+
+
+def test_load_portfolio_accepts_account_equity_keys(monkeypatch):
+    raw = {
+        "portfolio": {
+            "starting_equity": 50_000.0,
+            "use_account_equity": False,
+            "equity_min_ratio": 0.5,
+            "equity_max_ratio": 2.0,
+            "equity_currency": "EUR",
+        }
+    }
+    monkeypatch.setattr("core.config._load_yaml", lambda path: raw)
+    cfg = load_portfolio()
+    assert cfg.starting_equity == 50_000.0
+    assert cfg.use_account_equity is False
+    assert cfg.equity_min_ratio == 0.5
+    assert cfg.equity_max_ratio == 2.0
+    assert cfg.equity_currency == "EUR"
+
+
+def test_load_portfolio_without_account_equity_keys_uses_defaults(monkeypatch):
+    raw = {"portfolio": {"starting_equity": 100_000.0, "cycle_interval_sec": 60}}
+    monkeypatch.setattr("core.config._load_yaml", lambda path: raw)
+    cfg = load_portfolio()
+    assert cfg.use_account_equity is True
+    assert cfg.equity_min_ratio == 0.25
+    assert cfg.equity_max_ratio == 4.0
+    assert cfg.equity_currency == "USD"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"equity_min_ratio": 0},
+        {"equity_min_ratio": 1.5},
+        {"equity_max_ratio": 0.5},
+        {"starting_equity": 0},
+    ],
+)
+def test_portfolio_config_rejects_bad_equity_settings(kwargs):
+    with pytest.raises(ValueError):
+        PortfolioConfig(**kwargs)
