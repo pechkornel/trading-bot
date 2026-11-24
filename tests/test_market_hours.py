@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
 
-from core.market_hours import nyse_calendar
+from core.market_hours import nyse_calendar, to_eastern
 
 
 def _close_utc(day: str) -> datetime:
@@ -54,3 +54,36 @@ def test_calendar_reaches_the_end_of_the_year_after_next():
 
 def test_calendar_is_built_once_per_year():
     assert nyse_calendar() is nyse_calendar()
+
+
+# ---- to_eastern at the 2026 DST transitions ----
+
+
+@pytest.mark.parametrize(
+    ("utc", "expected"),
+    [
+        # Spring forward 2026-03-08: 07:00 UTC is 02:00 EST, clocks jump to 03:00 EDT.
+        (datetime(2026, 3, 8, 6, 30, tzinfo=timezone.utc), datetime(2026, 3, 8, 1, 30)),
+        (datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc), datetime(2026, 3, 8, 3, 0)),
+        (datetime(2026, 3, 8, 8, 30, tzinfo=timezone.utc), datetime(2026, 3, 8, 4, 30)),
+        # Fall back 2026-11-01: 06:00 UTC is 02:00 EDT, clocks return to 01:00 EST.
+        (datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc), datetime(2026, 11, 1, 1, 30)),
+        (datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc), datetime(2026, 11, 1, 1, 0)),
+        (datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc), datetime(2026, 11, 1, 1, 30)),
+        (datetime(2026, 11, 1, 7, 30, tzinfo=timezone.utc), datetime(2026, 11, 1, 2, 30)),
+    ],
+)
+def test_to_eastern_at_dst_transitions(utc, expected):
+    result = to_eastern(utc)
+    assert result == expected
+    assert result.tzinfo is None
+
+
+def test_to_eastern_naive_input_is_utc():
+    assert to_eastern(datetime(2026, 3, 8, 6, 30)) == datetime(2026, 3, 8, 1, 30)
+    assert to_eastern(datetime(2026, 7, 1, 12, 0)) == datetime(2026, 7, 1, 8, 0)
+
+
+def test_to_eastern_aware_non_utc_input():
+    plus_two = timezone(timedelta(hours=2))
+    assert to_eastern(datetime(2026, 11, 1, 8, 30, tzinfo=plus_two)) == datetime(2026, 11, 1, 1, 30)
