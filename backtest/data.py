@@ -69,6 +69,25 @@ def validate_frame(ticker: str, df: pd.DataFrame) -> None:
         raise DataError(f"{ticker}: duplicate dates")
 
 
+def drop_incomplete_tail(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop trailing rows with any missing price.
+
+    Yahoo returns a placeholder row with NaN prices for the latest day while it
+    is not finished. Only rows at the very end are dropped; a gap inside the
+    series is still rejected by validate_frame.
+    """
+    cols = [c for c in _COLUMNS if c in df.columns]
+    if not cols or len(df) == 0:
+        return df
+    complete = ~df[cols].isna().any(axis=1)
+    if complete.all():
+        return df
+    if not complete.any():
+        return df.iloc[0:0]
+    last_complete = complete.to_numpy().nonzero()[0][-1]
+    return df.iloc[: last_complete + 1]
+
+
 def _safe(name: str) -> str:
     return name.replace("^", "_").replace("/", "_")
 
@@ -210,7 +229,7 @@ def load_market_data(
             df = _retry(ticker, lambda t=ticker: fetch_yahoo(t))
             if not isinstance(df, pd.DataFrame):
                 raise DataError(f"{ticker}: fetcher returned no data frame")
-            _write_yahoo(path, ticker, df)
+            _write_yahoo(path, ticker, drop_incomplete_tail(df))
             downloaded = True
             manifest["tickers"][ticker] = {"downloaded_at": _stamp()}
         frame = _read_yahoo(path, ticker)
