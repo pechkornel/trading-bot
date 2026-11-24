@@ -71,10 +71,19 @@ def _write_session(cookie: str, account_id: str | None, path: Path | None = None
         "updated_at": time.time(),
     }
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload))
+    # 600 from the first byte: readable only by the bot user, no world readable window.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)  # also fixes a stale temp file and ignores the umask
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
-    # 600: readable only by the bot user
-    os.chmod(path, 0o600)
 
 
 def _read_session_file(path: Path) -> dict[str, Any] | None:
