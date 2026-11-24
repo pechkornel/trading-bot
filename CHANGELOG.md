@@ -30,7 +30,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (877 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (900 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - Account equity sizing: each cycle sizes the sleeves from the paper account's net liquidation and logs one `equity:` event. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio`, `equity_max_step`, `equity_last_max_age_sec` and `equity_currency` (#20).
 - The control page shows the last net liquidation next to the starting equity (#20).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
@@ -45,6 +45,7 @@ All notable changes to this project are documented here. The format follows
 - The gateway zip is fetched with `scripts/fetch_gateway.sh` and checked twice, instead of being downloaded during the image build.
 - The keeper runs from its own image target (`keeper`, headless Chromium) with the login secret. The other services use the `app` target.
 - `CPGWClient` verifies the gateway certificate when `CPGW_CA_FILE` is set.
+- Compose no longer sets `CPGW_CA_FILE`. Set it in `.env` (`/app/gateway_tls/cert.pem` for the Docker gateway), so the keeper and the runner no longer crash-loop with the host Java gateway. `deploy/README.md` shows how to export the Java gateway certificate.
 - `IbkrCredentials` hides the password in `repr`. The keeper banner shows only the first two characters of the username.
 - `.env.example` no longer has `IBKR_USERNAME` or `IBKR_PASSWORD`. It adds `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `IBKR_LOGIN_SECRET_FILE` and `CPGW_CA_FILE`.
 - **Upgrade note:** move `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` into `secrets/ibkr_login` (chmod 600, owner uid 1000), create `secrets/gateway_ssl_password`, run `scripts/fetch_gateway.sh`, and replace `core/ibkr_auth_private.py` with `deploy/ibkr_auth_private.py.example`. Follow `deploy/README.md` section 0B.
@@ -68,6 +69,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The portfolio runner follows the session file to an empty cookie after a keeper re-login, instead of keeping the stale one.
+- `CPGWError` no longer chains the unmasked httpx or JSON error, so account ids and URLs stay masked.
 - The satellite hold timer counts NYSE trading days instead of calendar days, so `hold_max_days` matches its meaning (#7).
 - US Eastern time uses the `America/New_York` zone, so the market state is correct on the DST change days. Holidays and early closes are known (#15).
 - `size_portfolio` no longer returns no decisions for a generator input when the gross cap applies (#9).
