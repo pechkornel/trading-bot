@@ -8,7 +8,9 @@ Type=exec
 User=%i
 WorkingDirectory=/opt/trading-bot
 EnvironmentFile=/opt/trading-bot/.env
-# Needs IBKR_USERNAME / IBKR_PASSWORD. Refuses to start without them.
+# The login is the file below (chmod 600, owned by the service user), never .env.
+# CPGW_CA_FILE (the gateway certificate for the browser pin) comes from .env.
+Environment=IBKR_LOGIN_SECRET_FILE=/opt/trading-bot/secrets/ibkr_login
 ExecStart=/opt/trading-bot/.venv/bin/python -m live.cpgw_keeper
 Restart=on-failure
 RestartSec=10

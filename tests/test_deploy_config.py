@@ -420,13 +420,36 @@ def test_fetch_gateway_curl_forces_https_and_tls12():
         assert "--tlsv1.2" in line
 
 
-LOGIN_IN_ENV = re.compile(r"^\s*IBKR_(USERNAME|PASSWORD)\s*=", re.MULTILINE)
+LOGIN_IN_ENV = re.compile(r"^\s*(Environment=)?IBKR_(USERNAME|PASSWORD)\s*=", re.MULTILINE)
 
 
-def test_deploy_readme_never_tells_you_to_put_the_login_in_env():
+def _deploy_files() -> list[str]:
+    units = sorted(p.name for p in (ROOT / "deploy" / "systemd").glob("*.service"))
+    return ["deploy/README.md", "deploy/UBUNTU_SETUP.md", *[f"deploy/systemd/{u}" for u in units]]
+
+
+def test_no_deploy_file_puts_the_login_in_env():
     # The login lives in secrets/ibkr_login. A sample .env line with it would
     # also trip the keeper's refusal to start while IBKR_PASSWORD is set.
-    assert not LOGIN_IN_ENV.search(_read("deploy/README.md"))
+    for rel in _deploy_files():
+        assert not LOGIN_IN_ENV.search(_read(rel)), rel
+
+
+def test_systemd_keeper_unit_uses_the_secret_file_and_the_env_file_for_the_ca():
+    unit = _read("deploy/systemd/tradingbot-cpgw-keeper.service")
+    assert "Environment=IBKR_LOGIN_SECRET_FILE=/opt/trading-bot/secrets/ibkr_login" in unit
+    assert "EnvironmentFile=/opt/trading-bot/.env" in unit
+    assert "IBKR_PASSWORD" not in unit
+
+
+def test_ubuntu_setup_explains_the_keeper_login_prerequisites():
+    text = _read("deploy/UBUNTU_SETUP.md")
+    assert "secrets/ibkr_login" in text
+    assert "chmod 600 secrets/ibkr_login" in text
+    assert "requirements-login.txt" in text
+    assert "playwright install --with-deps --only-shell chromium" in text
+    assert "CPGW_CA_FILE" in text
+    assert "xvfb" not in text.lower()
 
 
 def _readme_section(heading_re: str) -> str:
