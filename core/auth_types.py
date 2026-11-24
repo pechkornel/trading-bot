@@ -38,6 +38,10 @@ class LoginTimeout(IBKRAuthError):
     """The login did not finish in time."""
 
 
+class LoginSetupError(IBKRAuthError):
+    """The login setup is wrong (CA file, gateway URL, browser). No form was submitted."""
+
+
 class NotPaperAccount(IBKRAuthError):
     """The logged in account is not a paper account."""
 

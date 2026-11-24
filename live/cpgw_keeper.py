@@ -35,7 +35,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from core.auth_types import IBKRAuthError, IbkrCredentials, ManualStepRequired, NotPaperAccount
+from core.auth_types import (
+    IBKRAuthError,
+    IbkrCredentials,
+    LoginSetupError,
+    ManualStepRequired,
+    NotPaperAccount,
+)
 from core.config import (
     LOGS_DIR,
     KeeperConfig,
@@ -416,6 +422,22 @@ class Keeper:
             cooldown_sec=LOCKOUT_REMINDER_SEC,
         )
 
+    def _send_setup_alert(self, exc: BaseException, now: datetime) -> None:
+        """One clear message for a setup problem. The error text is a fixed string with no
+        secret, and the Redactor still runs over it."""
+        policy.mark_alert(self.state, "lockout", now)
+        self._save()
+        self._event("error", f"keeper locked out: login setup is wrong ({exc})")
+        self._alert(
+            "error",
+            f"the login setup is wrong: {exc}. No login form was submitted, so the IBKR "
+            "account was not touched. Check CPGW_CA_FILE (the gateway certificate file), "
+            "the gateway URL and that Playwright is installed (requirements-login.txt), "
+            "then run: python -m live.cpgw_keeper --reset-lockout",
+            key=f"lockout:{now.isoformat()}",
+            cooldown_sec=LOCKOUT_REMINDER_SEC,
+        )
+
     # ---- login ----
 
     def _on_login(self, action: policy.Action, now: datetime) -> None:
@@ -570,7 +592,9 @@ class Keeper:
                 key="not_paper",
                 cooldown_sec=LOCKOUT_REMINDER_SEC,
             )
-        if self.state.locked_out_reason:
+        if isinstance(exc, LoginSetupError):
+            self._send_setup_alert(exc, now)
+        elif self.state.locked_out_reason:
             self._send_lockout_alert(self.state.locked_out_reason, now)
 
 

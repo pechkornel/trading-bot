@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from core.auth_types import (
     BadCredentials,
+    LoginSetupError,
     ManualStepRequired,
     NotPaperAccount,
     SecondFactorRequired,
@@ -29,7 +30,13 @@ from core.auth_types import (
 from core.config import KeeperConfig
 
 # Failures that need a person: no retry after the first one.
-FATAL_LOGIN_ERRORS = (BadCredentials, SecondFactorRequired, ManualStepRequired, NotPaperAccount)
+FATAL_LOGIN_ERRORS = (
+    BadCredentials,
+    SecondFactorRequired,
+    ManualStepRequired,
+    NotPaperAccount,
+    LoginSetupError,
+)
 
 _MAX_TRACKED_ATTEMPTS = 50
 _MAX_TRACKED_SUBMITS = 200
@@ -183,7 +190,12 @@ def record_login_failure(
     The reason holds the exception class name only, never its text."""
     state.consecutive_failures += 1
     state.last_attempt_at = now
-    if isinstance(exc, FATAL_LOGIN_ERRORS):
+    if isinstance(exc, LoginSetupError):
+        state.locked_out_reason = (
+            "setup: the login setup is wrong and no login was submitted (the IBKR account "
+            "was not touched). Fix the setup, then run --reset-lockout"
+        )
+    elif isinstance(exc, FATAL_LOGIN_ERRORS):
         state.locked_out_reason = f"{type(exc).__name__}: fix the cause, then run --reset-lockout"
     elif _recent_failures(state, now, cfg) >= cfg.max_failed_logins:
         state.locked_out_reason = (

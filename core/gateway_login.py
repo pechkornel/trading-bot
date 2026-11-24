@@ -34,8 +34,8 @@ from urllib.parse import urlsplit
 from core.auth_types import (
     BadCredentials,
     GatewayUnreachable,
-    IBKRAuthError,
     IbkrCredentials,
+    LoginSetupError,
     LoginTimeout,
     ManualStepRequired,
     NotPaperAccount,
@@ -96,7 +96,7 @@ def spki_pin_from_pem(pem: bytes) -> str:
     except Exception:
         der = None
     if der is None:
-        raise IBKRAuthError("the gateway certificate file is not a valid PEM certificate")
+        raise LoginSetupError("the gateway certificate file is not a valid PEM certificate")
     return base64.b64encode(hashlib.sha256(der).digest()).decode()
 
 
@@ -106,7 +106,7 @@ def _require_local(base_url: str) -> None:
     except ValueError:
         host = None
     if host not in LOCAL_HOSTS:
-        raise IBKRAuthError("the gateway login url must be a local address")
+        raise LoginSetupError("the gateway login url must be a local address")
 
 
 def _attempt(fn: Callable[..., object], *args: object) -> str | None:
@@ -237,7 +237,7 @@ def playwright_page(config: GatewayLoginConfig, pin: str) -> Iterator[_Playwrigh
     try:
         from playwright.sync_api import sync_playwright  # lazy: not installed everywhere
     except ImportError:
-        raise IBKRAuthError("playwright is not installed (see requirements-login.txt)") from None
+        raise LoginSetupError("playwright is not installed (see requirements-login.txt)") from None
 
     parts = urlsplit(config.base_url)
     origin = f"{parts.scheme}://{parts.netloc}"
@@ -290,7 +290,7 @@ def login_via_gateway_page(
         raise NotPaperAccount("only paper accounts may log in")
     cert = config.cert_file
     if not cert or not Path(cert).is_file():
-        raise IBKRAuthError("CPGW_CA_FILE must name the gateway certificate file")
+        raise LoginSetupError("CPGW_CA_FILE must name the gateway certificate file")
     pin = spki_pin_from_pem(Path(cert).read_bytes())
     if not config.base_url:
         config = replace(config, base_url=f"https://127.0.0.1:{port}")
