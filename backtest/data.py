@@ -108,9 +108,14 @@ def drop_unsettled_today(
     time for ETFs, or after 17:15 for ^VIX and DX-Y.NYB, which settle later.
     Returns the kept frame and the dropped dates as YYYY-MM-DD strings.
     """
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError(
+            "the clock must return a timezone-aware datetime (for example "
+            "datetime.now(timezone.utc)), got a naive one"
+        )
     if len(df) == 0:
         return df, []
-    local = now.astimezone(_NY) if now.tzinfo else now.replace(tzinfo=_NY)
+    local = now.astimezone(_NY)
     cutoff = _SETTLE_LATE if ticker in _LATE_SETTLERS else _SETTLE_ETF
     today = pd.Timestamp(local.date())
     limit = today + pd.Timedelta(days=1) if local.time() > cutoff else today
@@ -304,7 +309,8 @@ def load_market_data(
 ) -> MarketData:
     """Load every ticker and FRED series, downloading what is missing (or all if refresh).
 
-    `now` is the clock used by the intraday guard (default: current UTC time).
+    `now` is the clock used by the intraday guard (default: current UTC time). It must
+    return a timezone-aware datetime; a naive one raises ValueError.
     """
     clock = now or _now
     cache = Path(cache_dir)

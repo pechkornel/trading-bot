@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -297,9 +298,54 @@ def test_manifest_records_dropped_dates(tmp_path):
     assert manifest["tickers"]["^VIX"]["dropped_unsettled"] == ["2024-03-13"]
 
 
+class EndingFakes(Fakes):
+    """Five business days ending on `last`."""
+
+    def __init__(self, last: str):
+        super().__init__()
+        self.last = last
+
+    def fetch_yahoo(self, ticker: str) -> pd.DataFrame:
+        idx = pd.bdate_range(end=self.last, periods=5)
+        close = pd.Series([100.0 + i for i in range(5)], index=idx)
+        return pd.DataFrame({"Close": close, "Adj Close": close * 0.98})
+
+
+def _load_ending(tmp_path, last, now):
+    return load_market_data(
+        ["SPY"],
+        ["T10Y2Y"],
+        tmp_path,
+        fetch_yahoo=EndingFakes(last).fetch_yahoo,
+        fetch_fred=Fakes().fetch_fred,
+        now=lambda: now,
+    )
+
+
 def test_weekend_download_keeps_friday(tmp_path):
-    md = _load_at(tmp_path, "2024-03-16 11:00")
-    assert md.raw_close.index[-1] == pd.Timestamp("2024-03-13")
+    friday = pd.Timestamp("2024-03-15")
+    assert friday.dayofweek == 4
+    saturday = _ny("2024-03-16 11:00")
+    md = _load_ending(tmp_path, "2024-03-15", saturday)
+    assert md.raw_close.index[-1] == friday
+    assert len(md.raw_close) == 5
+
+
+def test_utc_clock_after_cutoff_in_edt_keeps_todays_row(tmp_path):
+    now = pd.Timestamp("2026-03-09 20:35", tz="UTC").to_pydatetime()  # 16:35 EDT
+    md = _load_ending(tmp_path, "2026-03-09", now)
+    assert md.raw_close.index[-1] == pd.Timestamp("2026-03-09")
+
+
+def test_utc_clock_before_cutoff_in_est_drops_todays_row(tmp_path):
+    now = pd.Timestamp("2026-03-06 20:35", tz="UTC").to_pydatetime()  # 15:35 EST
+    md = _load_ending(tmp_path, "2026-03-06", now)
+    assert md.raw_close.index[-1] == pd.Timestamp("2026-03-05")
+
+
+def test_naive_clock_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="timezone-aware"):
+        _load_ending(tmp_path, "2024-03-13", datetime(2024, 3, 13, 18, 0))
 
 
 class ShiftedFakes(Fakes):
