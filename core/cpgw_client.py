@@ -14,6 +14,8 @@ and the Voyz/ibind library. See SECURITY.md for the audit and known caveats.
 
 from __future__ import annotations
 
+import os
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -101,6 +103,30 @@ class OrderTicket:
     raw: dict[str, Any] | None = None
 
 
+def _build_verify(ca_file: str | None) -> ssl.SSLContext | bool:
+    """
+    TLS verification setting for the gateway connection.
+
+    No certificate configured: verify=False, as before (the host Java gateway uses
+    a self-signed cert and the URL is localhost-pinned). With `ca_file` or the
+    `CPGW_CA_FILE` variable set, trust only that certificate and check the host
+    name. A set but unusable file fails closed. Messages never include the path
+    or any file content.
+    """
+    path = (ca_file if ca_file is not None else os.environ.get("CPGW_CA_FILE", "")).strip()
+    if not path:
+        return False
+    try:
+        ctx = ssl.create_default_context(cafile=path)
+    except (OSError, ssl.SSLError) as e:
+        raise CPGWError(
+            f"CPGW_CA_FILE is set but the certificate cannot be loaded ({type(e).__name__})"
+        ) from None
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
 # ---- the client ----------------------------------------------------------
 
 
@@ -124,12 +150,13 @@ class CPGWClient:
         port: int = 5000,
         host: str = "localhost",
         timeout: float = 30.0,
+        ca_file: str | None = None,
     ) -> None:
         self.account_id: str | None = None
         self._conid_cache: dict[str, int] = {}
         self._client = httpx.Client(
             base_url=f"https://{host}:{port}",
-            verify=False,  # CPGW uses a self-signed cert; URL is localhost-pinned
+            verify=_build_verify(ca_file),
             timeout=timeout,
             headers={
                 "accept": "application/json",
