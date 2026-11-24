@@ -35,6 +35,176 @@ Pick one. Both end with a dashboard you reach via Tailscale.
 
 ---
 
+## 0A. Home server (Docker)
+
+A fresh install on an Ubuntu box with Docker, reached over Tailscale, deployed by hand over SSH. It runs the gateway container, the dashboard, the keeper, the portfolio runner (dry run) and the sentiment worker.
+
+Notes before you start:
+
+- This section uses `~/trading-bot`. The systemd path and `UBUNTU_SETUP.md` use `/opt/trading-bot`. Both work: compose uses relative paths and `deploy/backup.sh` finds its own directory.
+- It changes no firewall rule and does not touch SSH. Docker bypasses ufw for published ports, so the gateway (5000) and the dashboard (8765) are bound to `127.0.0.1` only.
+- Every command below says where it runs. "Server" means over SSH on the Ubuntu box. "Laptop" means your own machine.
+- The portfolio stays in dry run. Adding `--live` to send paper orders is a separate, later decision and is not part of this guide.
+- Use the Docker gateway or the Java gateway from section 0, not both. Both want port 5000.
+
+### 1. Preflight (server)
+
+```bash
+uname -m                                  # expect x86_64
+grep -c -w avx2 /proc/cpuinfo             # expect a number above 0
+docker version --format '{{.Server.Version}}'   # expect 28 or newer
+systemctl is-enabled docker               # expect enabled
+tailscale status
+id -u                                     # expect 1000
+ss -ltn '( sport = :5000 )'               # expect no output
+```
+
+- If `avx2` prints `0`, stop. The pinned gateway binary needs AVX2. Use the Java gateway from `UBUNTU_SETUP.md` section 3 instead.
+- If something listens on port 5000 (for example the Java `cpgw` service), stop it first: `sudo systemctl disable --now cpgw`.
+- If `id -u` is not 1000, the `logs/` folder needs `chown` to your uid (see Troubleshooting).
+
+### 2. Clone (server)
+
+```bash
+git clone https://github.com/pechkornel/trading-bot.git ~/trading-bot
+cd ~/trading-bot
+mkdir -p logs
+```
+
+### 3. Environment file (server)
+
+```bash
+cp .env.example .env
+chmod 600 .env
+nano .env
+```
+
+Set these values:
+
+```
+PAPER=true
+DRY_RUN=true
+IB_PORT=5000
+DASHBOARD_HOST=127.0.0.1
+IBKR_USERNAME=<your paper username>
+IBKR_PASSWORD=<your paper password>
+SENTIMENT_PROVIDER=stub
+```
+
+- `SENTIMENT_PROVIDER` is `stub` (no key) or `alpha_vantage`. For `alpha_vantage`, also set `ALPHA_VANTAGE_API_KEY`.
+- Fill the `EMAIL_*` values too if you want notifications.
+- `.env` is git-ignored. Never commit it.
+
+### 4. Private login module
+
+The public repo has a stub login. The real one is a private file that stays on your machines and is never committed.
+
+Laptop (macOS zsh or Windows PowerShell, same command):
+
+```bash
+scp ibkr_auth_private.py <user>@<server>:~/trading-bot/core/ibkr_auth_private.py
+```
+
+Use the Tailscale name or IP of the server for `<server>`.
+
+Server:
+
+```bash
+cd ~/trading-bot
+chmod 600 core/ibkr_auth_private.py
+git check-ignore -v core/ibkr_auth_private.py   # must print the .gitignore rule
+git status --short                              # must print nothing
+```
+
+- Never run `git add -f` on this file.
+- The Docker build copies it into the local image `tradingbot:local`. Never push that image to a registry.
+
+### 5. Gateway (server)
+
+```bash
+cd ~/trading-bot
+docker compose --profile gateway up -d --build ibkr_gateway
+docker compose ps ibkr_gateway            # wait until it shows healthy
+ss -ltn '( sport = :5000 )'               # expect only 127.0.0.1:5000
+curl -sk https://127.0.0.1:5000/ | head -c 300
+```
+
+- The `curl` should print the gateway login page HTML.
+- If it prints "Access Denied", the gateway ignored the mounted `docker/gateway/conf.yaml` (this behaviour of the pinned build is not verified yet). Run `docker compose --profile gateway down` and stop. Nothing is exposed. Report it before going on.
+- From another tailnet machine, port 5000 must not be reachable. Laptop:
+
+```bash
+curl -sk --max-time 5 https://<server-lan-ip>:5000/
+```
+
+This must fail to connect. Do the same with the server's Tailscale IP.
+
+### 6. Dashboard (server)
+
+```bash
+docker compose up -d --build dashboard
+curl -fsS http://127.0.0.1:8765/api/health   # expect "paper":true, "dry_run":true, "ib_port":5000
+ss -ltn '( sport = :8765 )'                  # expect only 127.0.0.1:8765
+```
+
+### 7. Tailnet access (server)
+
+```bash
+sudo tailscale serve --bg 8765
+tailscale serve status
+tailscale funnel status
+```
+
+- `serve status` shows an `https://<machine>.<tailnet>.ts.net` URL that proxies to `http://127.0.0.1:8765`. The first run may ask you to enable HTTPS certificates in the Tailscale admin console.
+- `funnel status` must show no Funnel. Never run `tailscale funnel`: it publishes the dashboard to the public internet, and the dashboard has no authentication.
+- Open the URL from a device on your tailnet. `http://<tailnet-ip>:8765` does not work any more because of the loopback bind.
+
+### 8. Keeper, portfolio and sentiment (server)
+
+```bash
+docker compose --profile gateway --profile auto up -d --build
+docker compose logs -f cpgw_keeper        # Ctrl+C to leave
+docker compose logs portfolio | head
+docker compose logs sentiment | head
+```
+
+Check:
+
+- The keeper banner shows `auth=private`, then a successful login. `auth=stub` means the private module was not loaded (check step 4, then rebuild).
+- The portfolio banner shows `dry_run=True`.
+- The sentiment banner shows `provider=` with the value you chose.
+
+### 9. Update and stop (server)
+
+```bash
+cd ~/trading-bot
+git pull
+docker compose --profile gateway --profile auto up -d --build
+```
+
+Stop everything:
+
+```bash
+docker compose --profile gateway --profile auto down
+sudo tailscale serve reset
+```
+
+For nightly backups, add this line with `crontab -e`:
+
+```
+15 3 * * * $HOME/trading-bot/deploy/backup.sh
+```
+
+### Troubleshooting
+
+- "Access Denied" from the gateway: see step 5.
+- The gateway exits with code 132 or "Illegal instruction": the CPU lacks AVX2. Use the Java gateway.
+- `Pool overlaps` when compose creates the network: another Docker network uses 172.31.250.0/24. Change the subnet in `docker-compose.yml` and the allow pattern in `docker/gateway/conf.yaml` together. The tests check that they match.
+- Permission errors in `logs/`: `sudo chown 1000:1000 logs`.
+- Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt`. Add it and rebuild.
+
+---
+
 ## 1. Get the code onto the server
 
 ```bash
@@ -179,10 +349,11 @@ Do **not** expose port 8765 to the public internet. There's no auth.
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
-# read off your Tailscale IPv4 - e.g. 100.x.x.x
+sudo tailscale serve --bg 8765
+tailscale serve status
 ```
 
-Open `http://100.x.x.x:8765` from any device logged into the same Tailnet.
+The dashboard binds to `127.0.0.1` (`DASHBOARD_HOST`), so `http://<tailnet-ip>:8765` does not work. Open the `https://<machine>.<tailnet>.ts.net` URL that `serve status` prints, from any device on the same tailnet. Never use `tailscale funnel`.
 
 For external services that need callbacks (none right now, but in case Phase 6 adds webhooks): `tailscale serve` or a Cloudflare Tunnel with auth. Don't open the port.
 

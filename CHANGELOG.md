@@ -7,17 +7,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Loader for a private, git-ignored `core/ibkr_auth_private.py` login module. The public stub is used only when that file is missing.
+- `SENTIMENT_PROVIDER` in `.env` overrides the sentiment provider in `config/symbols.yaml`.
+- `DASHBOARD_HOST` in `.env` sets the dashboard bind address.
+- `ibkr_gateway` container (compose profile `gateway`), published on 127.0.0.1:5000 only, with the v1.0.0 release pinned by SHA-256.
+- "Home server (Docker)" guide in `deploy/README.md`.
+- ADR 0001: run the IBKR gateway as a native executable in a container.
 - `tests/test_config.py`: regression tests for the paper-mode lock and its error message.
 - `requirements-dev.txt` with pytest.
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (169 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (202 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI (#4).
 
 ### Changed
 
+- `DASHBOARD_HOST` defaults to `127.0.0.1`, so the dashboard is no longer reachable on the tailnet IP directly.
+  **Upgrade note:** run `sudo tailscale serve --bg 8765` and open the `https://<machine>.<tailnet>.ts.net` URL instead.
 - The core calendar trigger reason is now `calendar: Fri` instead of `calendar: Fri close`, because it fires on the first Friday cycle in Eastern time, not at the close (#5). Anything that matches the old string in `targets.reason` or the events log must be updated.
 - The `PortfolioConfig.reentry_cooldown_sec` default is now 86400 (was 600), matching `config/symbols.yaml` (#6).
 - The codebase is formatted with ruff. Imports are sorted and unused imports are removed (#4).
