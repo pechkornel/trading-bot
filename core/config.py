@@ -199,6 +199,7 @@ class SentimentSatelliteConfig:
 
     enabled: bool = False
     allocation_pct: float = 0.20
+    status: str = "active"
     universe: list[str] = field(
         default_factory=lambda: [
             "SPY",
@@ -219,6 +220,29 @@ class SentimentSatelliteConfig:
     hold_max_days: int = 10
     stop_loss_pct: float = 0.05
     longs_only: bool = True
+
+    def __post_init__(self) -> None:
+        if self.status not in ("active", "research"):
+            raise ValueError(
+                f"sleeves.sentiment.status={self.status!r} is not valid, use 'active' or 'research'"
+            )
+        alloc = self.allocation_pct
+        if isinstance(alloc, bool) or not isinstance(alloc, (int, float)):
+            raise ValueError(
+                f"sleeves.sentiment.allocation_pct must be a number, got {alloc!r} "
+                f"({type(alloc).__name__})"
+            )
+        if not 0.0 <= alloc <= 1.0:
+            raise ValueError(f"sleeves.sentiment.allocation_pct must be in [0, 1], got {alloc}")
+        if self.status == "research" and alloc != 0:
+            raise ValueError(
+                f"sleeves.sentiment.status is 'research', so allocation_pct must be 0 (got {alloc})"
+            )
+
+    @property
+    def tradeable(self) -> bool:
+        """True only when the sleeve is on, active and has a budget."""
+        return self.enabled and self.status == "active" and self.allocation_pct > 0
 
 
 @dataclass

@@ -99,7 +99,7 @@ class PortfolioRunner:
         )
         self.satellite = (
             SentimentSatelliteSleeve(self.sent_cfg, reentry_cooldown_sec=cooldown)
-            if self.sent_cfg.enabled
+            if self.sent_cfg.tradeable
             else None
         )
         self.macro_fetcher = MacroFetcher(self.macro_cfg)
@@ -123,7 +123,7 @@ class PortfolioRunner:
             symbols.update(self.core_cfg.universe)
             symbols.update(self.core_cfg.risk_off_universe)
             symbols.add("SPY")  # always need SPY for the risk-off filter
-        if self.sent_cfg.enabled:
+        if self.sent_cfg.tradeable:
             symbols.update(self.sent_cfg.universe)
         if self.tact_cfg.enabled:
             symbols.update(self.tact_cfg.universe)
@@ -140,12 +140,14 @@ class PortfolioRunner:
                 ("sentiment", self.sent_cfg),
                 ("tactical", self.tact_cfg),
             ]
-            if cfg.enabled
+            if cfg.enabled and (name != "sentiment" or self.sent_cfg.tradeable)
         ]
         active_str = (
             " · ".join(f"{name} ${total_eq * pct:,.0f} ({pct:.0%})" for name, pct in active)
             or "(none enabled)"
         )
+        if not self.sent_cfg.tradeable:
+            active_str += " · sentiment (research, 0%)"
         if self.portfolio_cfg.use_account_equity:
             active_str = (
                 f"budget base starting_equity ${total_eq:,.0f} "
@@ -161,6 +163,7 @@ class PortfolioRunner:
         print("=" * min(len(banner), 130))
         print(banner)
         print("=" * min(len(banner), 130))
+        self._warn_unmanaged_sentiment_holdings()
 
         session = read_session()
         if session is None or not session.get("cookie"):
@@ -174,6 +177,19 @@ class PortfolioRunner:
 
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
+
+    def _warn_unmanaged_sentiment_holdings(self) -> None:
+        """One warn event when simulated sentiment holdings exist but the sleeve is off.
+
+        Nothing is deleted and no orders are sent for them.
+        """
+        if self.sent_cfg.tradeable:
+            return
+        n = len(self.storage.get_holdings("sentiment"))
+        if n:
+            self.storage.log_event(
+                "warn", "portfolio", f"{n} simulated sentiment holdings are not managed"
+            )
 
     def _on_signal(self, *_: Any) -> None:
         print("\n[portfolio] stop signal received…")

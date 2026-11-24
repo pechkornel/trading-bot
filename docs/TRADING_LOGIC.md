@@ -30,18 +30,18 @@ The `portfolio` equity keys are checked when the config loads: `use_account_equi
 | Sleeve | Key | Enabled | Allocation | Budget |
 |---|---|---|---|---|
 | Core | `sleeves.core` | yes | 0.70 | 70,000 |
-| Sentiment satellite | `sleeves.sentiment` | yes | 0.20 | 20,000 |
+| Sentiment satellite (research) | `sleeves.sentiment` | no | 0.0 | 0 |
 | Tactical | `sleeves.tactical` | no | 0.0 | 0 |
 
-The remaining 10% (10,000) is never traded.
+The remaining 30% (30,000) is never traded.
 
 ```
 Total equity  100,000  (net liquidation, else last reading, else starting_equity)
 |
 +-- core       70%  70,000  macro + trend + momentum, weekly or on drift
-+-- sentiment  20%  20,000  news sentiment longs, short holds
++-- sentiment   0%       0  research status, off (premium data)
 +-- tactical    0%       0  disabled
-+-- unallocated 10% 10,000  never traded
++-- unallocated 30% 30,000  never traded
 ```
 
 The sleeves keep separate budgets and separate rows in the `holdings` table. The same symbol (SPY is in both universes) can be held by core and by the satellite at the same time. Positions do not net out.
@@ -185,6 +185,8 @@ The cooldown is derived from the `orders` table, not from a new column. `Storage
 ---
 
 ## 5. Sentiment satellite
+
+Status: research, off, 0% allocation. Alpha Vantage `NEWS_SENTIMENT` is now a premium endpoint, so the sleeve is not part of the portfolio. `sleeves.sentiment.status` is `active` or `research`. A `research` sleeve must have `allocation_pct: 0`, and the config refuses to load otherwise. The sleeve is tradeable only when `enabled` is true, the status is `active` and the allocation is above 0. Otherwise the runner builds no satellite and loads none of its symbols. If simulated sentiment holdings are left in SQLite from earlier runs, the runner writes one `warn` event at start and leaves them alone (no orders, nothing deleted). The rest of this section describes the rules the sleeve follows when it is switched back on.
 
 The satellite buys stocks and ETFs with strong positive news sentiment and holds them for a short time. The code is in `core/sleeves/sentiment_satellite.py`, `core/sentiment.py` and `live/sentiment_worker.py`.
 

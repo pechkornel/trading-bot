@@ -8,10 +8,13 @@
 #                 risk-off filter to bonds when SPY < 200d MA AND VIX > 25.
 #                 Typical hold: weeks to months.
 #
-#   sentiment   — 20% of equity. Alpha-Vantage-news-driven satellite (Phase 8B).
-#                 Longs only on bullish sentiment spikes (|score| > 0.4
-#                 with >=5 articles). 10-day hard exit or 5% stop. Max 4
-#                 concurrent, 5% of sleeve each.
+#   sentiment   — RESEARCH, 0% of equity, off. Alpha-Vantage-news-driven satellite
+#                 (Phase 8B). Alpha Vantage NEWS_SENTIMENT is now a premium
+#                 endpoint, so the sleeve stays out of the portfolio until a
+#                 working data source exists. Rules when active: longs only on
+#                 bullish sentiment spikes (|score| > 0.4 with >=5 articles),
+#                 10-day hard exit or 5% stop, max 4 concurrent, 5% of sleeve
+#                 each. The 30% it used to hold stays unallocated (cash).
 #
 #   tactical    — DISABLED. The 5-min XGBoost code stays in place; flip
 #                 `enabled: true` to bring it back.
@@ -142,8 +145,9 @@ sleeves:
     drift_threshold: 0.08                # rebalance if any holding drifts >8%
 
   sentiment:
-    enabled: true                        # Phase 8B: live
-    allocation_pct: 0.20
+    enabled: false                       # off: Alpha Vantage NEWS_SENTIMENT is premium now
+    allocation_pct: 0.0                  # research status requires 0
+    status: research                     # active | research
     universe: [SPY, QQQ, AAPL, MSFT, NVDA, TSLA, AMZN, META, GOOGL]
     # Entry rules
     sentiment_threshold: 0.4             # |score| must exceed
