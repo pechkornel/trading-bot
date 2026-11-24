@@ -56,7 +56,7 @@ openssl x509 -in config/gateway_cert.pem -noout -ext subjectAltName
 
 ## 0A. Home server (Docker)
 
-A fresh install on an Ubuntu box with Docker, reached over Tailscale, deployed by hand over SSH. It runs the gateway container, the dashboard, the keeper and the portfolio runner (dry run). The sentiment worker is off by default (compose profile `research`, see section 0B step 13).
+A fresh install on an Ubuntu box with Docker, reached over Tailscale, deployed by hand over SSH. It runs the gateway container, the dashboard, the keeper and the portfolio runner (dry run). The sentiment worker is off by default (compose profile `research`, see section 0B step 16).
 
 Already running an older version of this stack? Use section 0B (Phase 1 upgrade) instead of starting here.
 
@@ -287,13 +287,13 @@ Run `git checkout main` later to leave the detached state.
 ### Troubleshooting
 
 - "Access Denied" from the gateway: see step 5.
-- The gateway restarts in a loop: run `docker compose logs ibkr_gateway`. One likely cause is that the unverified `--conf ../root/conf.yaml` path is wrong for the pinned build. Report the last log lines, run `docker compose --profile gateway down`, and fall back to the Java gateway (see Rollback).
+- The gateway restarts in a loop: run `docker compose logs ibkr_gateway`. One likely cause is that the unverified `--conf ../run/conf.yaml` path is wrong for the pinned build. Report the last log lines, run `docker compose --profile gateway down`, and fall back to the Java gateway (see Rollback).
 - The gateway exits with code 132 or "Illegal instruction": the CPU lacks AVX2. Use the Java gateway.
 - `Pool overlaps` when compose creates the network: another Docker network uses 172.31.250.0/24. Change the subnet in `docker-compose.yml` and the allow pattern in `docker/gateway/conf.yaml` together. The tests check that they match.
 - Permission errors in `logs/`: `sudo chown 1000:1000 logs`.
 - Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt` or `requirements-login.txt`. Add it and rebuild.
 - The keeper refuses to start and mentions `IBKR_PASSWORD`: remove `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` (and from the environment of the container). The login is read from `secrets/ibkr_login` only.
-- The keeper is locked out: see section 0B step 14.
+- The keeper is locked out: see section 0B step 15.
 
 ---
 

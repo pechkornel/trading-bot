@@ -461,6 +461,31 @@ def _readme_section(heading_re: str) -> str:
     return rest[: nxt.start()] if nxt else rest
 
 
+def test_readme_0b_step_references_point_to_the_right_headings():
+    text = _read("deploy/README.md")
+    steps = dict(
+        (int(n), title)
+        for n, title in re.findall(r"^### (\d+)\. ([^\n]+)$", _phase1_section_text(text), re.M)
+    )
+    for n, word in ((16, "Sentiment"), (15, "Lockout")):
+        assert word in steps[n], (n, steps[n])
+    for n in map(int, re.findall(r"0B step (\d+)", text)):
+        assert n in steps
+    assert "see section 0B step 16)" in text
+    assert "section 0B step 15." in text
+
+
+def test_readme_names_the_rendered_gateway_conf_path():
+    text = _read("deploy/README.md")
+    assert "../root/conf.yaml" not in text.replace("`./bin/run.sh root/conf.yaml", "")
+    assert "--conf ../run/conf.yaml" in text
+
+
+def _phase1_section_text(text: str) -> str:
+    start = text.index("## 0B. Phase 1 upgrade")
+    return text[start : text.index("\n## 1. Get the code", start)]
+
+
 def test_both_install_paths_fetch_the_gateway_before_the_first_gateway_build():
     sections = {
         "0A": _readme_section(r"^## 0A\. Home server \(Docker\)$"),
