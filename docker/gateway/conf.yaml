@@ -1,5 +1,5 @@
-# Config for the IBKR gateway container. IBKR's default conf.yaml, with only
-# the ips block changed.
+# Config for the IBKR gateway container. This is IBKR's default root/conf.yaml
+# from clientportal.gw.zip, with only the ips block changed.
 #
 # Why the allow list is still localhost-only: the container publishes port 5000
 # on the host's 127.0.0.1 only (docker-compose.yml), so only local processes can
@@ -7,11 +7,13 @@
 # address 172.31.250.1, so the bridge range must be allowed. A LAN address would
 # be denied, which is why 192.* is deliberately not listed. If you change the
 # subnet in docker-compose.yml, change the pattern below to match.
-ccp: false
+ip2loc: "US"
 proxyRemoteSsl: true
 proxyRemoteHost: "https://api.ibkr.com"
 listenPort: 5000
 listenSsl: true
+ccp: false
+svcEnvironment: "v1"
 sslCert: "vertx.jks"
 sslPwd: "mywebapi"
 authDelay: 3000
@@ -20,14 +22,14 @@ serverOptions:
   blockedThreadCheckInterval: 1000000
   eventLoopPoolSize: 20
   workerPoolSize: 20
-  maxWebsocketFrameSize: 1000000
-  maxWebsocketMessageSize: 1000000
+  maxWorkerExecuteTime: 100
+  internalBlockingPoolSize: 20
 cors:
   origin.allowed: "*"
   allowCredentials: false
 webApps:
-  - name: demo
-    index: index.html
+  - name: "demo"
+    index: "index.html"
 ips:
   allow:
     - 127.0.0.1        # the gateway's own healthcheck
