@@ -13,12 +13,13 @@ All notable changes to this project are documented here. The format follows
 - `ibkr_gateway` container (compose profile `gateway`), published on 127.0.0.1:5000 only, with the v1.0.0 release pinned by SHA-256.
 - "Home server (Docker)" guide in `deploy/README.md`.
 - ADR 0001: run the IBKR gateway as a native executable in a container.
+- `exchange_calendars` (NYSE `XNYS` calendar) and `tzdata` in `requirements.txt`. `core/market_hours.py` uses them for sessions, holidays and early closes (#15).
 - `tests/test_config.py`: regression tests for the paper-mode lock and its error message.
 - `requirements-dev.txt` with pytest.
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (211 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (259 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
 - `.github/dependabot.yml`: weekly updates for the GitHub Actions used in CI (#4).
 
@@ -27,6 +28,9 @@ All notable changes to this project are documented here. The format follows
 - The Docker guide in `deploy/README.md` requires Docker Engine 28 or later.
 - `DASHBOARD_HOST` defaults to `127.0.0.1`, so the dashboard is no longer reachable on the tailnet IP directly.
   **Upgrade note:** run `sudo tailscale serve --bg 8765` and open the `https://<machine>.<tailnet>.ts.net` URL instead.
+- The runner no longer evaluates core or opens satellite positions on NYSE holidays. A new `HOLIDAY` market regime is treated like `WEEKEND`: satellite exits still run, entries and the core sleeve do not (#15).
+- On early-close days (13:00 ET) `OPEN` ends at the real close and after-close logic starts there (#15).
+- The satellite hold timer exit reason is now `hold timer: 10 trading days >= 10 max` (was `hold timer: 10d >= 10d max`). Anything that matches the old string in `targets.reason` or the events log must be updated. Open positions exit later than before when a weekend or holiday falls in their hold period, including positions opened before the upgrade (#7).
 - The core calendar trigger reason is now `calendar: Fri` instead of `calendar: Fri close`, because it fires on the first Friday cycle in Eastern time, not at the close (#5). Anything that matches the old string in `targets.reason` or the events log must be updated.
 - The `PortfolioConfig.reentry_cooldown_sec` default is now 86400 (was 600), matching `config/symbols.yaml` (#6).
 - The codebase is formatted with ruff. Imports are sorted and unused imports are removed (#4).
@@ -38,6 +42,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The satellite hold timer counts NYSE trading days instead of calendar days, so `hold_max_days` matches its meaning (#7).
+- US Eastern time uses the `America/New_York` zone, so the market state is correct on the DST change days. Holidays and early closes are known (#15).
 - The core weekday and once-per-day checks use the US Eastern date instead of UTC, so the weekly rebalance runs on the first Friday cycle in Eastern time and no longer on Thursday evening (#5).
 - `portfolio.reentry_cooldown_sec` is enforced for the core and sentiment sleeves: a symbol a sleeve sold to 0 shares is not bought back by that sleeve for 24 hours. Top-ups and sells are never blocked (#6).
 - Satellite skip reasons have no leading space (#16).
