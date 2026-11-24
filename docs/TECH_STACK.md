@@ -55,6 +55,8 @@ The whole bot is Python. One language end-to-end = one venv, one dep tree, one s
 |---|---|---|
 | **pandas** | ≥ 2.0 | OHLCV DataFrames, indicator calc, signal alignment |
 | **numpy** | ≥ 1.24 | Array math under pandas; manual ops in sizing |
+| **exchange_calendars** | ≥ 4.13, < 5 | NYSE (XNYS) sessions, holidays and early closes; rules ship in the package, no network |
+| **tzdata** | ≥ 2025.2 | IANA time zone data for `zoneinfo` (Windows has none) |
 | **scipy** | ≥ 1.10 | `linregress` for the linear-regression channel indicator |
 
 No `polars`, no `xarray`, no fancy data frameworks. The whole bot works on at most a few thousand rows per cycle - pandas is fast enough and everyone reads it.

@@ -11,6 +11,11 @@ joblib>=1.3
 python-dotenv>=1.0
 pyyaml>=6.0
 
+# NYSE holidays and early closes (rules in the package, no network).
+# tzdata is explicit because Windows has no system tz database for zoneinfo.
+exchange_calendars>=4.13,<5
+tzdata>=2025.2
+
 # Phase 7 — Client Portal Gateway over HTTPS, replaces ibapi (TWS binary protocol)
 httpx>=0.27
 cryptography>=42.0   # RSA-PKCS1v1.5 in the SRP-K extension
