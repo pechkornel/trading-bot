@@ -69,12 +69,14 @@ def models_page(request: Request):
 
 @app.get("/control", response_class=HTMLResponse)
 def control_page(request: Request):
+    last = _storage().equity_history(1)
     return templates.TemplateResponse(
         request,
         "control.html",
         {
             "cfg": load_app_config(),
             "portfolio": load_portfolio(),
+            "last_equity": last[0] if last else None,
             "models": list_models(),
             "processes": procmgr.list_processes(),
         },

@@ -16,7 +16,9 @@
   <p class="text-xs text-slate-400 mb-3">
     Runs both sleeves on one IB connection. Long-term rebalances on schedule/drift;
     tactical sizes per-cycle from fused TA + sentiment.
-    Equity ${{ "%.0f"|format(portfolio.starting_equity) }} ·
+    Starting equity ${{ "%.0f"|format(portfolio.starting_equity) }} (fallback) ·
+    {% if last_equity %}last net liquidation ${{ "%.2f"|format(last_equity.equity) }} at {{ last_equity.ts }} ·
+    {% endif %}
     cooldown {{ portfolio.reentry_cooldown_sec }}s
   </p>
   <div class="flex gap-2">
