@@ -542,17 +542,19 @@ PY
 Look for:
 
 - No error. A `RuntimeError: navigation failed` means the page did not load. Either Chromium rejected the certificate (this headless shell did not honour the pin flag), or the gateway is down or denies the request. Check the gateway first (step 9). If `curl` works but the probe fails, the pin flag is the cause. That fails closed. Stop and report. The fix is a follow-up decision. Never switch to ignoring HTTPS errors.
-- `matches: 1` for each of the three selectors. The defaults in `core/gateway_login.py` are best guesses:
+- `matches: 1` for each of the three selectors. The defaults in `core/gateway_login.py` were checked against the real login page on 2026-11-25:
   - username field: `input[name='username']`
   - password field: `input[name='password']`
-  - submit button: `button[type='submit']`
+  - submit button: `button.xyz-button-login` (the page has six submit buttons, only this one is visible)
 - The `outerHTML` lines show the real field names. Compare them with the defaults.
 
-The three result markers are texts that only appear after a submit, so no probe can check them safely:
+The page has a "Trading Mode" switch that starts on Live. Before it types anything, the login clicks the switch label (`label[for='toggle1']`) and requires the hidden checkbox `#toggle1` to be checked (Paper). If it does not flip, the login stops with "did not switch to paper mode" before any credential is typed or submitted, and the keeper locks out (step 15).
 
-- success: `text=Client login succeeds`
-- bad credentials: `text=Invalid username password combination`
-- second factor: `text=Challenge`
+Markers count only visible elements, because the page holds hidden second-factor and error sections from the start. The result markers:
+
+- success: `text=Client login succeeds` (only after a submit, not checked yet)
+- bad credentials: `text=Invalid username password combination` (only after a submit, not checked yet)
+- second factor: the visible answer fields of the second-factor screens (`#xyz-field-bronze-response`, `#xyz-field-silver-response`, `#xyz-field-gold-response`, `#xyz-field-temp-response`) or the passkey and OTP choice buttons
 
 A wrong marker is safe but stops the keeper. Success is decided by the gateway API (`/iserver/auth/status`), not by page text, so a wrong success marker only costs up to the 30 second API wait. A wrong bad-credentials or second-factor marker ends as "needs a manual step", which locks the keeper out after that one attempt (see step 15). Nothing is retried.
 

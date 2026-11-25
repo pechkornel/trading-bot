@@ -54,15 +54,27 @@ class LoginPage(Protocol):
 
     def click(self, selector: str) -> None: ...
 
+    def is_checked(self, selector: str) -> bool: ...
+
     def wait_for_first(self, markers: dict[str, str], timeout_sec: float) -> str | None: ...
 
 
+# The second-factor answer fields of the gateway login page (card, SMS code, response
+# code, temporary code) and the passkey and OTP choice buttons. All of them are in the
+# page from the start but hidden; only visible elements count as a marker.
+_SECOND_FACTOR_FIELDS = (
+    "#xyz-field-bronze-response, #xyz-field-silver-response, #xyz-field-gold-response, "
+    "#xyz-field-temp-response, .xyz-passkey-secure-start, .xyz-otp-select-text"
+)
+
+
 def _default_markers() -> dict[str, str]:
-    # Best guesses for the gateway login page. Confirmed on the server (deploy step).
+    # Checked against the real gateway login page on the server, except the two texts
+    # that only appear after a submit. Only visible elements count (see wait_for_first).
     return {
         "success": "text=Client login succeeds",
         "bad_credentials": "text=Invalid username password combination",
-        "second_factor": "text=Challenge",
+        "second_factor": _SECOND_FACTOR_FIELDS,
     }
 
 
@@ -72,7 +84,13 @@ class GatewayLoginConfig:
     cert_file: str | None = None
     username_selector: str = "input[name='username']"
     password_selector: str = "input[name='password']"
-    submit_selector: str = "button[type='submit']"
+    # The page has six submit buttons; only this one is visible on the first screen.
+    submit_selector: str = "button.xyz-button-login"
+    # The "Trading Mode" switch starts on Live. The flow clicks its label, then requires
+    # the hidden checkbox to be checked (Paper) before it types anything. An empty click
+    # selector skips this step.
+    paper_switch_click_selector: str = "label[for='toggle1']"
+    paper_switch_input_selector: str = "#toggle1"
     markers: dict[str, str] = field(default_factory=_default_markers)
     page_timeout_sec: float = 60.0
     api_timeout_sec: float = 30.0
@@ -130,6 +148,16 @@ def _raise_for(kind: str, *, before_submit: bool) -> None:
     raise ManualStepRequired("the gateway login page needs a manual step")
 
 
+def _paper_selected(page: LoginPage, config: GatewayLoginConfig) -> bool:
+    result: list[bool] = []
+    kind = _attempt(
+        lambda: result.append(bool(page.is_checked(config.paper_switch_input_selector)))
+    )
+    if kind:
+        _raise_for(kind, before_submit=True)
+    return result[0]
+
+
 def run_login_flow(
     page: LoginPage,
     creds: IbkrCredentials,
@@ -143,15 +171,29 @@ def run_login_flow(
     base_url = config.base_url or "https://127.0.0.1:5000"
     _require_local(base_url)
 
-    steps: list[tuple[Callable[..., object], tuple[object, ...]]] = [
-        (page.goto, (base_url.rstrip("/") + "/",)),
-        (page.fill, (config.username_selector, creds.username)),
-        (page.fill, (config.password_selector, creds.password)),
-    ]
-    for fn, args in steps:
-        kind = _attempt(fn, *args)
+    kind = _attempt(page.goto, base_url.rstrip("/") + "/")
+    if kind:
+        _raise_for(kind, before_submit=True)
+
+    switch = config.paper_switch_click_selector
+    if switch and not _paper_selected(page, config):
+        kind = _attempt(page.click, switch)
         if kind:
             _raise_for(kind, before_submit=True)
+        if not _paper_selected(page, config):
+            raise ManualStepRequired("the gateway login page did not switch to paper mode")
+
+    for selector, value in (
+        (config.username_selector, creds.username),
+        (config.password_selector, creds.password),
+    ):
+        kind = _attempt(page.fill, selector, value)
+        if kind:
+            _raise_for(kind, before_submit=True)
+
+    # Check the switch once more right before the submit.
+    if switch and not _paper_selected(page, config):
+        raise ManualStepRequired("the gateway login page did not switch to paper mode")
 
     on_submit()
 
@@ -214,12 +256,23 @@ class _PlaywrightPage:
                 raise TimeoutError("timeout") from None
             raise RuntimeError("click failed") from None
 
+    def is_checked(self, selector: str) -> bool:
+        try:
+            return bool(self._page.is_checked(selector, timeout=self._timeout_ms))
+        except Exception as exc:
+            if type(exc).__name__ == "TimeoutError":
+                raise TimeoutError("timeout") from None
+            raise RuntimeError("check failed") from None
+
     def wait_for_first(self, markers: dict[str, str], timeout_sec: float) -> str | None:
+        # Only visible elements count: the login page holds hidden second-factor and
+        # error sections from the start, which must not read as an outcome.
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
             for name, selector in markers.items():
                 try:
-                    if self._page.locator(selector).count() > 0:
+                    loc = self._page.locator(selector)
+                    if any(loc.nth(i).is_visible() for i in range(loc.count())):
                         return name
                 except Exception:
                     raise RuntimeError("marker check failed") from None

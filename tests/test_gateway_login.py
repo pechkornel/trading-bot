@@ -39,11 +39,19 @@ FAKE_USER = "paperuser-x1"
 FAKE_PASSWORD = "not-a-real-password-7f3a"
 
 
+PAPER_LABEL = "label[for='toggle1']"
+PAPER_INPUT = "#toggle1"
+
+
 class FakePage:
-    def __init__(self, marker=None, fail=None):
+    """The login page as seen on the server: the paper switch starts on Live."""
+
+    def __init__(self, marker=None, fail=None, paper=False, switch_works=True):
         self.calls: list[tuple] = []
         self.marker = marker
         self.fail = fail or {}
+        self.paper = paper
+        self.switch_works = switch_works
 
     def _maybe_fail(self, name):
         if name in self.fail:
@@ -59,7 +67,17 @@ class FakePage:
 
     def click(self, selector):
         self.calls.append(("click", selector))
+        if selector == PAPER_LABEL:
+            self._maybe_fail("paper_click")
+            if self.switch_works:
+                self.paper = not self.paper
+            return
         self._maybe_fail("click")
+
+    def is_checked(self, selector):
+        self.calls.append(("is_checked", selector))
+        self._maybe_fail("is_checked")
+        return self.paper if selector == PAPER_INPUT else False
 
     def wait_for_first(self, markers, timeout_sec):
         self.calls.append(("wait", tuple(markers), timeout_sec))
@@ -121,7 +139,8 @@ def test_second_factor_marker():
 
 
 def test_on_submit_once_and_before_click():
-    page = FakePage(marker="success")
+    # paper=True: no switch click, so only the login click is recorded.
+    page = FakePage(marker="success", paper=True)
     order = []
     orig_click = page.click
 
@@ -479,3 +498,112 @@ def test_playwright_page_refuses_a_non_local_base_url_before_launch(monkeypatch)
         with gateway_login.playwright_page(cfg, "pin"):
             pass
     assert "launched" not in seen
+
+
+# --- Paper switch and visible-only markers (seen on the server, 2026-11-25) -----------
+
+
+def _names(page):
+    return [c[0] if c[0] != "click" else f"click:{c[1]}" for c in page.calls]
+
+
+def test_defaults_match_the_real_login_page():
+    cfg = GatewayLoginConfig()
+    assert cfg.paper_switch_click_selector == PAPER_LABEL
+    assert cfg.paper_switch_input_selector == PAPER_INPUT
+    # Only one of the six submit buttons on the page is visible: the main login button.
+    assert cfg.submit_selector == "button.xyz-button-login"
+    # The hidden second-factor sections hold the word "Challenge" before any submit.
+    assert "Challenge" not in cfg.markers["second_factor"]
+    for field in ("#xyz-field-silver-response", "#xyz-field-bronze-response"):
+        assert field in cfg.markers["second_factor"]
+
+
+def test_flow_switches_to_paper_before_typing_and_submitting():
+    page = FakePage(marker="success", paper=False)
+    order = []
+    run(page, on_submit=lambda: order.append(len(page.calls)))
+    names = _names(page)
+    switch = names.index(f"click:{PAPER_LABEL}")
+    first_fill = names.index("fill")
+    assert names[0] == "goto"
+    assert switch < first_fill
+    assert page.paper is True
+    # checked again right before the submit
+    assert names[order[0] - 1] == "is_checked"
+    assert names.index("click:button.xyz-button-login") >= order[0]
+
+
+def test_flow_leaves_an_already_selected_paper_switch_alone():
+    page = FakePage(marker="success", paper=True)
+    run(page)
+    assert f"click:{PAPER_LABEL}" not in _names(page)
+    assert page.paper is True
+
+
+def test_switch_that_does_not_flip_stops_before_any_credential_or_submit():
+    page = FakePage(marker="success", paper=False, switch_works=False)
+    submits = []
+    with pytest.raises(ManualStepRequired) as err:
+        run(page, on_submit=lambda: submits.append(1))
+    assert submits == []
+    assert not any(c[0] == "fill" for c in page.calls)
+    assert "paper" in str(err.value)
+
+
+@pytest.mark.parametrize("where", ["paper_click", "is_checked"])
+def test_switch_errors_stop_before_any_credential_or_submit(where):
+    page = FakePage(marker="success", fail={where: RuntimeError(FAKE_PASSWORD)})
+    submits = []
+    with pytest.raises(IBKRAuthError) as err:
+        run(page, on_submit=lambda: submits.append(1))
+    assert submits == []
+    assert not any(c[0] == "fill" for c in page.calls)
+    assert FAKE_PASSWORD not in str(err.value)
+
+
+def test_empty_switch_selector_skips_the_switch_step():
+    page = FakePage(marker="success", paper=False)
+    cfg = dataclasses.replace(config(), paper_switch_click_selector="")
+    run(page, cfg=cfg)
+    assert not any(c[0] == "is_checked" for c in page.calls)
+
+
+class _Loc:
+    def __init__(self, visible):
+        self._visible = visible
+
+    def count(self):
+        return len(self._visible)
+
+    def nth(self, i):
+        loc = _Loc([])
+        loc.is_visible = lambda: self._visible[i]
+        return loc
+
+
+class _RawPage:
+    def __init__(self, elements):
+        self.elements = elements  # selector -> list of visibility flags
+        self.waits = 0
+
+    def locator(self, selector):
+        return _Loc(self.elements.get(selector, []))
+
+    def wait_for_timeout(self, ms):
+        self.waits += 1
+
+
+def _adapter(elements):
+    return gateway_login._PlaywrightPage(_RawPage(elements), None, "https://127.0.0.1:5000", 1.0)
+
+
+def test_markers_ignore_hidden_elements():
+    # Five hidden "second factor" elements exist on the page before any submit.
+    page = _adapter({"2fa": [False] * 5})
+    assert page.wait_for_first({"second_factor": "2fa"}, timeout_sec=0.3) is None
+
+
+def test_markers_report_the_first_visible_one():
+    page = _adapter({"2fa": [False, False], "ok": [False, True]})
+    assert page.wait_for_first({"second_factor": "2fa", "success": "ok"}, 1.0) == "success"
