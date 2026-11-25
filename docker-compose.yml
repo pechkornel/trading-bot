@@ -1,18 +1,20 @@
 # Compose file for the home server.
 #
 # What runs:
-#   - `dashboard`     — always on, FastAPI on host port 8765
+#   - `dashboard`     - always on, FastAPI on host port 8765
 #                       (bound to DASHBOARD_HOST, default 127.0.0.1)
-#   - `cpgw_keeper`   — auto profile; SRP login + /tickle keepalive
-#   - `portfolio`     — auto profile; multi-sleeve runner, depends on the keeper
-#   - `sentiment`     — auto profile; news/sentiment poller
+#   - `cpgw_keeper`   - auto profile; headless gateway login + /tickle keepalive
+#                       (own image target `keeper`, holds the login secret)
+#   - `portfolio`     - auto profile; multi-sleeve runner, depends on the keeper
+#   - `sentiment`     - research profile (normally off); news/sentiment poller
 #   - `ibkr_gateway`  - gateway profile; IBKR Client Portal Gateway (pinned native
 #                       executable) on its own bridge network, published on
 #                       127.0.0.1:5000 only
 #
 # Usage:
 #   docker compose up -d                       # dashboard only
-#   docker compose --profile auto up -d        # dashboard + keeper + portfolio + sentiment
+#   docker compose --profile auto up -d        # dashboard + keeper + portfolio
+#   docker compose --profile research up -d    # adds the sentiment poller
 #   docker compose --profile gateway up -d     # the gateway container only
 #
 # CPGW (Client Portal Gateway) can run here (profile `gateway`) or on the HOST as
@@ -21,14 +23,27 @@
 # https://localhost:5000 either way.
 #
 # Required in .env:
-#   IBKR_USERNAME, IBKR_PASSWORD   — used by cpgw_keeper for SRP login
-#   PAPER=true                     — assert_paper_mode refuses anything else
-#   IB_PORT=5000                   — CPGW only ever uses 5000
+#   PAPER=true                     - assert_paper_mode refuses anything else
+#   IB_PORT=5000                   - CPGW only ever uses 5000
+#
+# Gateway certificate: CPGW_CA_FILE is NOT set in this file. Every bot service
+# already reads .env (env_file), so the path lives there and is empty by default.
+# Set CPGW_CA_FILE=/app/gateway_tls/cert.pem in .env only when you run the
+# ibkr_gateway service. With the host Java gateway, point it at the certificate
+# you exported (see deploy/README.md) or leave it empty for the portfolio runner.
+# A fixed path here would crash-loop the keeper and the runner without cert.pem.
+#
+# The IBKR login is NOT in .env. It is the file ./secrets/ibkr_login (mode 600),
+# mounted as a Compose secret into cpgw_keeper only.
+#
+# Memory: every service has mem_limit equal to memswap_limit (no swap). Normal
+# total (dashboard, keeper, portfolio, gateway) is 2560m; with `research` 2816m.
 
 x-bot-common: &bot-common
   build:
     context: .
     dockerfile: docker/Dockerfile
+    target: app
   image: tradingbot:local
   restart: unless-stopped
   network_mode: host
@@ -44,6 +59,8 @@ services:
   dashboard:
     <<: *bot-common
     container_name: tradingbot-dashboard
+    mem_limit: 512m
+    memswap_limit: 512m
     command:
       - uvicorn
       - dashboard.app:app
@@ -60,14 +77,37 @@ services:
 
   cpgw_keeper:
     <<: *bot-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: keeper
+    image: tradingbot-keeper:local
     container_name: tradingbot-cpgw-keeper
     profiles: ["auto"]
+    mem_limit: 640m
+    memswap_limit: 640m
     command:
       - python
       - -m
       - live.cpgw_keeper
-    # Needs IBKR_USERNAME / IBKR_PASSWORD in .env. Logs into CPGW (port 5000)
-    # via SRP-6a and refreshes the session every 60s.
+    # Logs into the gateway headlessly and keeps the session alive.
+    # The login comes from the Compose secret ibkr_login (/run/secrets/ibkr_login).
+    # core/secret_store.py requires that file to be mode 600 and owned by the
+    # reading uid. A Compose file secret keeps the owner and mode of the host
+    # file, so the container user is pinned to uid 1000 (the `bot` user in
+    # docker/Dockerfile) and secrets/ibkr_login must be owned by uid 1000 on the
+    # host: chown 1000:1000 secrets/ibkr_login && chmod 600 secrets/ibkr_login.
+    user: "1000:1000"
+    secrets:
+      - ibkr_login
+    volumes:
+      - ./logs:/app/logs
+      - ./models/artifacts:/app/models/artifacts
+      - ./config:/app/config:ro
+      - ./.env:/app/.env:ro
+      - ibkr_gateway_tls:/app/gateway_tls:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       dashboard:
         condition: service_healthy
@@ -76,11 +116,20 @@ services:
     <<: *bot-common
     container_name: tradingbot-portfolio
     profiles: ["auto"]
+    mem_limit: 640m
+    memswap_limit: 640m
     command:
       - python
       - -m
       - live.portfolio_runner
-      # Default to dry-run; flip to "--live" when you're ready and `docker compose up -d`
+      # Dry run by default. Sending paper orders is a deliberate, separate edit
+      # of this command (see CLAUDE.md), never part of the shipped file.
+    volumes:
+      - ./logs:/app/logs
+      - ./models/artifacts:/app/models/artifacts
+      - ./config:/app/config:ro
+      - ./.env:/app/.env:ro
+      - ibkr_gateway_tls:/app/gateway_tls:ro
     depends_on:
       dashboard:
         condition: service_healthy
@@ -90,7 +139,9 @@ services:
   sentiment:
     <<: *bot-common
     container_name: tradingbot-sentiment
-    profiles: ["auto"]
+    profiles: ["research"]
+    mem_limit: 256m
+    memswap_limit: 256m
     command:
       - python
       - -m
@@ -103,15 +154,25 @@ services:
   ibkr_gateway:
     build:
       context: docker/gateway
+      # Run scripts/fetch_gateway.sh first: it puts the pinned zip here.
+      additional_contexts:
+        vendor: ./vendor/ibkr-gateway
     image: tradingbot-ibkr-gateway:v1.0.0
     container_name: tradingbot-ibkr-gateway
     profiles: ["gateway"]
+    mem_limit: 768m
+    memswap_limit: 768m
     restart: unless-stopped
     networks: [ibkr_gateway]
     ports:
       - "127.0.0.1:5000:5000"   # loopback only, never "5000:5000"
+    secrets:
+      - gateway_ssl_password
+    tmpfs:
+      - /opt/ibkr-gateway/run:uid=10001,gid=10001,mode=0700,size=1m
     volumes:
-      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/root/conf.yaml:ro
+      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/conf.template.yaml:ro
+      - ibkr_gateway_tls:/opt/ibkr-gateway/tls
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
@@ -120,3 +181,12 @@ networks:
     ipam:
       config:
         - subnet: 172.31.250.0/24
+
+volumes:
+  ibkr_gateway_tls:
+
+secrets:
+  gateway_ssl_password:
+    file: ./secrets/gateway_ssl_password
+  ibkr_login:
+    file: ./secrets/ibkr_login

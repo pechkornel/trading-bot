@@ -1,0 +1,5 @@
+# Extra dependencies for the headless gateway login (cpgw_keeper image only).
+# After installing, run: playwright install --with-deps chromium-headless-shell
+-r requirements.txt
+
+playwright==1.64.1

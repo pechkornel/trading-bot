@@ -1,0 +1,29 @@
+"""Template for core/ibkr_auth_private.py (git-ignored, never commit the real file).
+
+Copy it to core/ibkr_auth_private.py. It is wiring only: the login flow itself is the
+tracked, tested module core/gateway_login.py. Credentials come from secrets/ibkr_login
+through core.secret_store, never from this file.
+
+Selectors and success markers can be overridden in login_config() after you confirm them
+against the real login page on the server, for example:
+
+    return dataclasses.replace(GatewayLoginConfig.from_env(), username_selector="...")
+
+login() uses login_config(), and the read-only probe in deploy/README.md (step 12) calls
+login_config() too, so the probe sees the same overrides as a real login.
+"""
+
+from core.gateway_login import GatewayLoginConfig, login_via_gateway_page
+
+
+def login_config() -> GatewayLoginConfig:
+    return GatewayLoginConfig.from_env()
+
+
+def login(creds, *, port, **kwargs):
+    return login_via_gateway_page(
+        creds,
+        port=port,
+        config=login_config(),
+        on_submit=kwargs.get("on_submit"),
+    )

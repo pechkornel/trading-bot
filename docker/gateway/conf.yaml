@@ -1,12 +1,13 @@
 # Config for the IBKR gateway container. This is IBKR's default root/conf.yaml
-# from clientportal.gw.zip, with only the ips block changed.
+# from clientportal.gw.zip, with only sslPwd and the ips block changed.
 #
-# Why the allow list is still localhost-only: the container publishes port 5000
-# on the host's 127.0.0.1 only (docker-compose.yml), so only local processes can
-# connect. Docker's proxy makes every such connection arrive from the bridge
-# address 172.31.250.1, so the bridge range must be allowed. A LAN address would
-# be denied, which is why 192.* is deliberately not listed. If you change the
-# subnet in docker-compose.yml, change the pattern below to match.
+# Why the allow list is exactly two addresses: the container publishes port 5000
+# on the host's 127.0.0.1 only (docker-compose.yml). Docker's proxy makes every
+# such connection arrive from the bridge gateway 172.31.250.1, and the gateway's
+# own healthcheck comes from 127.0.0.1. A LAN address would be denied. If you
+# change the subnet in docker-compose.yml, change the address below to match.
+# sslPwd is a placeholder: entrypoint.sh renders this file into a tmpfs and fills
+# it from the gateway_ssl_password secret. The password is never stored here.
 ip2loc: "US"
 proxyRemoteSsl: true
 proxyRemoteHost: "https://api.ibkr.com"
@@ -15,7 +16,7 @@ listenSsl: true
 ccp: false
 svcEnvironment: "v1"
 sslCert: "vertx.jks"
-sslPwd: "mywebapi"
+sslPwd: "__SSL_PWD__"
 authDelay: 3000
 portalBaseURL: ""
 serverOptions:
@@ -33,6 +34,6 @@ webApps:
 ips:
   allow:
     - 127.0.0.1        # the gateway's own healthcheck
-    - 172.31.250.*     # docker proxy on the ibkr_gateway bridge (see docker-compose.yml)
+    - 172.31.250.1     # docker proxy on the ibkr_gateway bridge (see docker-compose.yml)
   deny:
     - 212.90.324.10    # unchanged from IBKR's default

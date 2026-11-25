@@ -206,9 +206,9 @@ IB_HOST=localhost
 IB_PORT=5000
 IB_CLIENT_ID=0
 
-# IBKR credentials - used by cpgw_keeper for SRP-6a login
-IBKR_USERNAME=your_ibkr_paper_login
-IBKR_PASSWORD=your_ibkr_paper_password
+# Gateway certificate for the keeper's login (see "Gateway certificate" below).
+# The IBKR login is NOT here, it is the file secrets/ibkr_login.
+CPGW_CA_FILE=/app/config/gateway_cert.pem
 
 # Gmail SMTP for trade alerts (generate an App Password)
 EMAIL_USER=you@gmail.com
@@ -225,6 +225,38 @@ Sanity check it's readable only by you:
 stat -c '%a %n' .env                         # expect: 600 .env
 ```
 
+### IBKR login secret file
+
+The keeper logs in headlessly with a username and password. They are never in `.env` (the keeper refuses to start while `IBKR_PASSWORD` is set in its environment or in `.env`). They live in `secrets/ibkr_login`:
+
+```bash
+cd /opt/trading-bot
+mkdir -p secrets && chmod 700 secrets
+umask 077
+cp secrets/ibkr_login.example secrets/ibkr_login
+nano secrets/ibkr_login                      # IBKR_USERNAME=... and IBKR_PASSWORD=... lines, paper account
+chmod 600 secrets/ibkr_login
+chown 1000:1000 secrets/ibkr_login           # Docker keeper runs as uid 1000; systemd: the service user
+```
+
+The file must be owned by the user that runs the keeper and have no group or other permission, or `core/secret_store.py` refuses it. The file is git-ignored.
+
+### Gateway certificate
+
+The login pins the gateway certificate and refuses to run without a CA file. This guide uses the host Java gateway, so export its certificate once (commands and the SAN check are in `deploy/README.md`, section 0, "Java gateway: export its certificate once"). Save it as `config/gateway_cert.pem` and set `CPGW_CA_FILE=/app/config/gateway_cert.pem` in `.env`, as above. For the systemd keeper use the host path `CPGW_CA_FILE=/opt/trading-bot/config/gateway_cert.pem`.
+
+### systemd keeper only: Python venv
+
+Skip this when the keeper runs in Docker (its image already has everything). For the systemd unit `tradingbot-cpgw-keeper`, install the login dependencies into the venv as the service user. The browser is headless (Chromium headless shell), so no X server or virtual display is needed:
+
+```bash
+cd /opt/trading-bot
+uv pip install --python .venv/bin/python -r requirements-login.txt
+.venv/bin/playwright install --with-deps --only-shell chromium
+```
+
+`--with-deps` installs system libraries and needs `sudo`, so run that command as a sudo-capable user, then run `.venv/bin/playwright install --only-shell chromium` once as the service user so the browser lands in that user's cache. The unit reads the login from `/opt/trading-bot/secrets/ibkr_login` (`IBKR_LOGIN_SECRET_FILE`) and `CPGW_CA_FILE` from `.env`.
+
 ---
 
 ## 6. First run - bring everything up
@@ -235,7 +267,7 @@ docker compose --profile auto up -d --build
 
 # Watch logs while things spin up
 docker compose ps
-docker compose logs -f cpgw_keeper           # wait for "login OK - account=<id>"
+docker compose logs -f cpgw_keeper           # wait for "login OK, account=***NN" (the id is masked)
 ```
 
 Once the keeper says `login OK`, everything else lights up automatically:

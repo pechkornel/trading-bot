@@ -30,6 +30,7 @@ from core.config import SymbolConfig, assert_paper_mode, load_app_config, load_s
 from core.cpgw_client import CPGWClient, NotAuthenticatedError
 from core.features import get_features
 from core.indicators import calculate_indicators, capitalize_columns
+from live.account_guard import require_paper_account_for_live
 from live.cpgw_keeper import read_session
 from live.notifier import format_trade_alert, send_email
 from live.storage import Storage
@@ -40,15 +41,17 @@ BULLISH_CLASSES = {1, 2}
 
 
 def _client_from_session(port: int) -> CPGWClient:
-    """Load the cookie that cpgw_keeper writes; refuse to start if it's missing."""
+    """Load the session file that cpgw_keeper writes; refuse to start if it is missing.
+
+    An empty cookie is fine: the gateway holds the session itself."""
     session = read_session()
-    if session is None or not session.get("cookie"):
+    if session is None:
         raise RuntimeError(
             "No CPGW session found. Start `python -m live.cpgw_keeper` first "
             "(or the cpgw_keeper service) — it logs in and writes the session "
             "cookie that the runners read."
         )
-    client = CPGWClient(cookie=session["cookie"], port=port)
+    client = CPGWClient(cookie=str(session.get("cookie") or ""), port=port)
     if session.get("account_id"):
         client.account_id = session["account_id"]
     return client
@@ -90,7 +93,9 @@ class Runner:
         print("=" * len(banner))
         print(banner)
         print("=" * len(banner))
-        self.client = _client_from_session(self.app_cfg.ib.port)
+        client = _client_from_session(self.app_cfg.ib.port)
+        require_paper_account_for_live(client.account_id, dry_run=self.dry_run)
+        self.client = client
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
 
@@ -127,10 +132,12 @@ class Runner:
 
     def _cycle(self) -> None:
         assert self.client is not None
-        # Re-read the session cookie every cycle so the keeper's refreshes flow through
+        # Re-read the session cookie every cycle so the keeper's refreshes flow through.
+        # Follow the file even to an empty cookie (the gateway then holds the session),
+        # so a stale cookie is never kept. A missing file changes nothing.
         session = read_session()
-        if session and session.get("cookie"):
-            self.client.update_cookie(session["cookie"])
+        if session:
+            self.client.update_cookie(str(session.get("cookie") or ""))
 
         raw = self.client.get_historical_data(
             self.symbol,

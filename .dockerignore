@@ -5,6 +5,12 @@ __pycache__
 *.pyo
 .DS_Store
 .env
+.env.*
+!.env.example
+*.key
+*.pem
+!tests/fixtures/*.pem
+.claude/
 logs/
 models/artifacts/legacy/
 models/artifacts/*/model.pkl
@@ -15,3 +21,5 @@ docs/
 README.md
 deploy/README.md
 data/
+secrets/
+vendor/

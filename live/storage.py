@@ -475,6 +475,40 @@ class Storage:
                 ).fetchall()
             ]
 
+    def has_event(self, source: str, message: str, since: str | None = None) -> bool:
+        """True when an event with this source and exact message exists (read only)."""
+        q = "SELECT 1 FROM events WHERE source = ? AND message = ?"
+        args: tuple = (source, message)
+        if since is not None:
+            q += " AND ts >= ?"
+            args += (since,)
+        with self._conn() as c:
+            return c.execute(q + " LIMIT 1", args).fetchone() is not None
+
+    def last_event(self, source: str) -> dict[str, Any] | None:
+        """Newest event of a source, or None (read only)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM events WHERE source = ? ORDER BY id DESC LIMIT 1", (source,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def count_events(self, level: str, since: str) -> int:
+        """Number of events of a level at or after an ISO timestamp (read only)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) FROM events WHERE level = ? AND ts >= ?", (level, since)
+            ).fetchone()
+        return int(row[0])
+
+    def order_status_counts(self, since: str) -> dict[str, int]:
+        """Orders at or after an ISO timestamp, counted by status (read only)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT status, COUNT(*) AS n FROM orders WHERE ts >= ? GROUP BY status", (since,)
+            ).fetchall()
+        return {r["status"]: int(r["n"]) for r in rows}
+
     def equity_history(self, limit: int = 1000) -> list[dict[str, Any]]:
         with self._conn() as c:
             return [

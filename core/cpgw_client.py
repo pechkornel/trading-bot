@@ -14,6 +14,9 @@ and the Voyz/ibind library. See SECURITY.md for the audit and known caveats.
 
 from __future__ import annotations
 
+import os
+import re
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -77,6 +80,16 @@ def _translate_period(period: str) -> str:
     raise ValueError(f"unrecognised period {period!r}; CPGW expects e.g. 5d, 1m, 2y")
 
 
+_ACCOUNT_SHAPED = re.compile(r"\b[A-Z]{1,2}\d{5,}\b")
+
+
+def mask_account(text: str, account_id: object = None) -> str:
+    """Mask the account id, and anything shaped like one, as `***` plus its last 2 characters."""
+    if isinstance(account_id, str) and account_id:
+        text = text.replace(account_id, "***" + account_id[-2:])
+    return _ACCOUNT_SHAPED.sub(lambda m: "***" + m.group(0)[-2:], text)
+
+
 # ---- exceptions ----------------------------------------------------------
 
 
@@ -99,6 +112,39 @@ class OrderTicket:
     local_order_id: str | None = None
     order_status: str | None = None
     raw: dict[str, Any] | None = None
+
+
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _build_verify(ca_file: str | None, host: str = "localhost") -> ssl.SSLContext | bool:
+    """
+    TLS verification setting for the gateway connection.
+
+    No certificate configured: verify=False for a loopback host only, as before (the
+    host Java gateway uses a self-signed cert). A non-loopback host without a
+    certificate is refused, because the traffic would leave the machine unverified. With `ca_file` or the
+    `CPGW_CA_FILE` variable set, trust only that certificate and check the host
+    name. A set but unusable file fails closed. Messages never include the path
+    or any file content.
+    """
+    path = (ca_file if ca_file is not None else os.environ.get("CPGW_CA_FILE", "")).strip()
+    if not path:
+        if host.strip("[]").lower() not in _LOOPBACK_HOSTS:
+            raise CPGWError(
+                "CPGW_CA_FILE is required when the gateway host is not loopback "
+                "(localhost, 127.0.0.1, ::1)"
+            )
+        return False
+    try:
+        ctx = ssl.create_default_context(cafile=path)
+    except (OSError, ssl.SSLError) as e:
+        raise CPGWError(
+            f"CPGW_CA_FILE is set but the certificate cannot be loaded ({type(e).__name__})"
+        ) from None
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
 
 
 # ---- the client ----------------------------------------------------------
@@ -124,12 +170,14 @@ class CPGWClient:
         port: int = 5000,
         host: str = "localhost",
         timeout: float = 30.0,
+        ca_file: str | None = None,
     ) -> None:
+        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
         self.account_id: str | None = None
         self._conid_cache: dict[str, int] = {}
         self._client = httpx.Client(
-            base_url=f"https://{host}:{port}",
-            verify=False,  # CPGW uses a self-signed cert; URL is localhost-pinned
+            base_url=f"https://{url_host}:{port}",
+            verify=_build_verify(ca_file, host),
             timeout=timeout,
             headers={
                 "accept": "application/json",
@@ -149,21 +197,33 @@ class CPGWClient:
         self._client.close()
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+
+        def masked(text: str) -> str:
+            return mask_account(text, self.account_id)
+
+        # The errors below are raised after the except block, so neither
+        # __cause__ nor __context__ keeps the unmasked httpx or JSON error
+        # (its text can hold the account id, the URL or the response body).
+        transport_error = ""
+        r = None
         try:
             r = self._client.request(method, path, **kwargs)
         except httpx.HTTPError as e:
-            raise CPGWError(f"HTTP transport error on {method} {path}: {e}") from e
+            transport_error = f"HTTP transport error on {method} {path}: {e}"
+        if r is None:
+            raise CPGWError(masked(transport_error))
 
         if r.status_code == 401:
-            raise NotAuthenticatedError(f"{method} {path} -> 401, session expired")
+            raise NotAuthenticatedError(masked(f"{method} {path} -> 401, session expired"))
         if r.status_code >= 400:
-            raise CPGWError(f"{method} {path} -> {r.status_code}: {r.text[:300]}")
+            raise CPGWError(masked(f"{method} {path} -> {r.status_code}: {r.text[:300]}"))
         if not r.text:
             return None
         try:
             return r.json()
-        except ValueError as e:
-            raise CPGWError(f"{method} {path} returned non-JSON: {r.text[:300]}") from e
+        except ValueError:
+            pass
+        raise CPGWError(masked(f"{method} {path} returned non-JSON: {r.text[:300]}"))
 
     # ---- session ----
 
@@ -213,7 +273,7 @@ class CPGWClient:
         # caller is expected to have authenticated against the right type.
         acct_id = accts[0].get("id") or accts[0].get("accountId")
         if not acct_id:
-            raise CPGWError(f"Account response missing 'id': {accts[0]}")
+            raise CPGWError(mask_account(f"Account response missing 'id': {accts[0]}"))
         self.account_id = acct_id
         return acct_id
 

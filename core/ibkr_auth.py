@@ -15,6 +15,9 @@ the bottom of this module and its `login` replaces the stub. The file is git-ign
 and must never be committed. Contract:
 
 - It must define `login(creds, *, port, **kwargs) -> str`, returning the session cookie.
+- The exception classes and `IbkrCredentials` live in `core.auth_types` and are
+  re-exported here: IBKRAuthError, MaxLoginAttempts, BadCredentials, SecondFactorRequired,
+  ManualStepRequired, GatewayUnreachable, LoginTimeout, NotPaperAccount.
 - It may define `IbkrCredentials`, `IBKRAuthError` and `MaxLoginAttempts`. If it does,
   those replace the public ones. It may also import them from `core.ibkr_auth`.
 - Only a missing `core.ibkr_auth_private` falls back to the stub. If the file exists but
@@ -27,22 +30,18 @@ prints and logs nothing.
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
 
-
-class IBKRAuthError(RuntimeError):
-    """Raised when the login fails."""
-
-
-class MaxLoginAttempts(IBKRAuthError):
-    """Raised after too many failed login attempts."""
-
-
-@dataclass(frozen=True)
-class IbkrCredentials:
-    username: str
-    password: str
-    is_paper: bool = True
+from core.auth_types import (  # noqa: F401
+    BadCredentials,
+    GatewayUnreachable,
+    IBKRAuthError,
+    IbkrCredentials,
+    LoginTimeout,
+    ManualStepRequired,
+    MaxLoginAttempts,
+    NotPaperAccount,
+    SecondFactorRequired,
+)
 
 
 def _stub_login(creds: IbkrCredentials, *args, **kwargs):

@@ -11,10 +11,13 @@ Nothing here is symbol-specific by default — pass a symbol to load_symbol().
 
 from __future__ import annotations
 
+import datetime as dt
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from dotenv import load_dotenv
@@ -199,6 +202,7 @@ class SentimentSatelliteConfig:
 
     enabled: bool = False
     allocation_pct: float = 0.20
+    status: str = "active"
     universe: list[str] = field(
         default_factory=lambda: [
             "SPY",
@@ -219,6 +223,29 @@ class SentimentSatelliteConfig:
     hold_max_days: int = 10
     stop_loss_pct: float = 0.05
     longs_only: bool = True
+
+    def __post_init__(self) -> None:
+        if self.status not in ("active", "research"):
+            raise ValueError(
+                f"sleeves.sentiment.status={self.status!r} is not valid, use 'active' or 'research'"
+            )
+        alloc = self.allocation_pct
+        if isinstance(alloc, bool) or not isinstance(alloc, (int, float)):
+            raise ValueError(
+                f"sleeves.sentiment.allocation_pct must be a number, got {alloc!r} "
+                f"({type(alloc).__name__})"
+            )
+        if not 0.0 <= alloc <= 1.0:
+            raise ValueError(f"sleeves.sentiment.allocation_pct must be in [0, 1], got {alloc}")
+        if self.status == "research" and alloc != 0:
+            raise ValueError(
+                f"sleeves.sentiment.status is 'research', so allocation_pct must be 0 (got {alloc})"
+            )
+
+    @property
+    def tradeable(self) -> bool:
+        """True only when the sleeve is on, active and has a budget."""
+        return self.enabled and self.status == "active" and self.allocation_pct > 0
 
 
 @dataclass
@@ -273,6 +300,118 @@ class SentimentConfig:
     poll_interval_sec: int = 3600
     staleness_sec: int = 7200
     symbols: list[str] = field(default_factory=lambda: ["SPY", "AAPL", "QQQ", "GLD"])
+
+
+_HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
+
+
+def _parse_hhmm(key: str, value: Any) -> dt.time:
+    """Parse a strict 24 hour "HH:MM" string, naming the keeper key on failure."""
+    if not isinstance(value, str) or not _HHMM.fullmatch(value):
+        raise ValueError(f'keeper.{key} must be a quoted "HH:MM" time string, got {value!r}')
+    return dt.time(int(value[:2]), int(value[3:]))
+
+
+@dataclass
+class KeeperConfig:
+    """Session keeper timing, lockout and paper account settings (`keeper:` block)."""
+
+    tickle_interval_sec: int = 60
+    timezone: str = "America/New_York"
+    nightly_gap_start: str = "00:45"
+    nightly_gap_end: str = "01:30"
+    maintenance_weekday: int = 5  # 0=Mon, 5=Sat
+    maintenance_start: str = "00:00"
+    maintenance_end: str = "23:59"
+    max_session_age_sec: int = 86400
+    login_backoff_base_sec: int = 60
+    login_backoff_max_sec: int = 1800
+    max_failed_logins: int = 3
+    failed_login_window_sec: int = 86400
+    session_lost_alert_cooldown_sec: int = 3600
+    paper_account_prefix: str = "DU"
+    max_logins_per_window: int = (
+        6  # all submitted logins per failed_login_window_sec, success or not
+    )
+    min_session_sec: int = 600  # a session shorter than this makes the next drop back off
+    # A cookie-less 401 from the gateway means "nobody is logged in". Only true when the
+    # gateway session is gateway-wide. Set false when it answers 401 while logged in.
+    cookieless_401_means_logged_out: bool = True
+
+    def __post_init__(self) -> None:
+        for key in (
+            "tickle_interval_sec",
+            "max_session_age_sec",
+            "login_backoff_base_sec",
+            "login_backoff_max_sec",
+            "max_failed_logins",
+            "failed_login_window_sec",
+            "session_lost_alert_cooldown_sec",
+            "max_logins_per_window",
+            "min_session_sec",
+        ):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"keeper.{key} must be a whole number, got {value!r}")
+            if value < 1:
+                raise ValueError(f"keeper.{key} must be >= 1, got {value}")
+        if self.login_backoff_max_sec < self.login_backoff_base_sec:
+            raise ValueError(
+                "keeper.login_backoff_max_sec must be >= login_backoff_base_sec, got "
+                f"{self.login_backoff_max_sec} and {self.login_backoff_base_sec}"
+            )
+        day = self.maintenance_weekday
+        if isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6:
+            raise ValueError(
+                f"keeper.maintenance_weekday must be a whole number 0 (Mon) to 6 (Sun), got {day!r}"
+            )
+        tz = self.timezone
+        if not isinstance(tz, str) or not tz.strip():
+            raise ValueError(f"keeper.timezone must be a time zone name, got {tz!r}")
+        try:
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+            raise ValueError(f"keeper.timezone {tz!r} is not a known time zone") from exc
+        if not isinstance(self.cookieless_401_means_logged_out, bool):
+            raise ValueError(
+                "keeper.cookieless_401_means_logged_out must be true or false (a YAML "
+                f"boolean), got {self.cookieless_401_means_logged_out!r}"
+            )
+        prefix = self.paper_account_prefix
+        if not isinstance(prefix, str) or not prefix.strip():
+            raise ValueError(
+                f"keeper.paper_account_prefix must be a non-empty string, got {prefix!r}"
+            )
+        gap_start = _parse_hhmm("nightly_gap_start", self.nightly_gap_start)
+        gap_end = _parse_hhmm("nightly_gap_end", self.nightly_gap_end)
+        if gap_end <= gap_start:
+            raise ValueError(
+                "keeper.nightly_gap_end must be after nightly_gap_start (no midnight wrap), got "
+                f"{self.nightly_gap_start} and {self.nightly_gap_end}"
+            )
+        m_start = _parse_hhmm("maintenance_start", self.maintenance_start)
+        m_end = _parse_hhmm("maintenance_end", self.maintenance_end)
+        if m_end <= m_start:
+            raise ValueError(
+                "keeper.maintenance_end must be after maintenance_start, got "
+                f"{self.maintenance_start} and {self.maintenance_end}"
+            )
+
+    @property
+    def nightly_gap_start_time(self) -> dt.time:
+        return _parse_hhmm("nightly_gap_start", self.nightly_gap_start)
+
+    @property
+    def nightly_gap_end_time(self) -> dt.time:
+        return _parse_hhmm("nightly_gap_end", self.nightly_gap_end)
+
+    @property
+    def maintenance_start_time(self) -> dt.time:
+        return _parse_hhmm("maintenance_start", self.maintenance_start)
+
+    @property
+    def maintenance_end_time(self) -> dt.time:
+        return _parse_hhmm("maintenance_end", self.maintenance_end)
 
 
 @dataclass
@@ -380,6 +519,13 @@ def load_portfolio() -> PortfolioConfig:
     data = _load_yaml(CONFIG_DIR / "symbols.yaml")
     raw = data.get("portfolio") or {}
     return PortfolioConfig(**raw)
+
+
+def load_keeper_config() -> KeeperConfig:
+    """Load the `keeper:` block from config/symbols.yaml, or defaults."""
+    data = _load_yaml(CONFIG_DIR / "symbols.yaml")
+    raw = data.get("keeper") or {}
+    return KeeperConfig(**raw)
 
 
 def load_sleeves() -> tuple[LongTermSleeveConfig, TacticalSleeveConfig]:

@@ -18,7 +18,7 @@ positions:
 | Sleeve | Share | Strategy |
 |---|---:|---|
 | **Core** | 70% | Weekly score-based allocation across 10 ETFs (equity, bonds, gold, commodities, cash). Score = 40% momentum + 30% macro alignment + 30% trend; holds the top 4 equally weighted, with a hard risk-off switch to bonds when SPY is below its 200-day average and VIX is above 25. |
-| **Sentiment** | 20% | News-driven satellite on the Alpha Vantage News & Sentiment API: goes long only on strong bullish spikes (score above 0.4 with at least 5 articles), with a 10-day exit or a 5% stop. |
+| **Sentiment** | off (0%) | News-driven satellite on the Alpha Vantage News & Sentiment API: goes long only on strong bullish spikes (score above 0.4 with at least 5 articles), with a 10-day exit or a 5% stop. It is in research status because that endpoint is now premium, so 30% of equity stays unallocated. |
 | **Tactical** | off | The original 5-minute XGBoost / LSTM trend models with volatility-targeted sizing. The code is kept and can be switched back on in `config/symbols.yaml`. |
 
 The trading rules are written up in plain language in [docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md),
@@ -61,7 +61,7 @@ models/      training (XGBoost, LSTM) and the artifact registry
 live/        portfolio runner, sentiment worker, SQLite storage, notifications
 dashboard/   FastAPI + HTMX web UI: status, sleeves, targets, orders, models, logs, start/stop
 deploy/      Ubuntu setup, systemd units, backups
-docker/      Dockerfile and the optional gateway image; docker-compose.yml runs dashboard, portfolio runner and sentiment worker
+docker/      Dockerfile and the optional gateway image; docker-compose.yml runs dashboard, keeper and portfolio runner (the sentiment worker is in profile `research`)
 ```
 
 ## Safety
@@ -69,9 +69,10 @@ docker/      Dockerfile and the optional gateway image; docker-compose.yml runs 
 - Hard **paper-only lock**: `PAPER=true` and a paper gateway port are required, checked in
   `core.config.assert_paper_mode()` before any broker connection is opened.
 - **Dry run by default**: decisions are logged, orders are only sent with `--live`.
-- The automated broker login is **not included** in this public version (`core/ibkr_auth.py` is
-  a stub). You can add your own as `core/ibkr_auth_private.py`, which is git-ignored and must
-  never be committed. See [SECURITY.md](SECURITY.md).
+- The keeper logs in headlessly through the gateway's own login page (`core/gateway_login.py`).
+  The thin wiring file `core/ibkr_auth_private.py` is git-ignored and must never be committed
+  (template: `deploy/ibkr_auth_private.py.example`). The IBKR login is a chmod 600 file,
+  `secrets/ibkr_login`, not part of `.env`. See [SECURITY.md](SECURITY.md).
 - The dashboard has no authentication, so it binds to `127.0.0.1` by default. Use
   `tailscale serve` for tailnet access, never Funnel.
 

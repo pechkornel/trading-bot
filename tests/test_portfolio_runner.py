@@ -467,3 +467,51 @@ def test_level_follows_disabled_field_not_reason_text(tmp_path, monkeypatch):
     r._cycle()
 
     assert equity_events(r.storage)[0]["level"] == "warn"
+
+
+def test_cycle_follows_the_session_file_even_to_an_empty_cookie(tmp_path, monkeypatch):
+    import live.portfolio_runner as pr
+
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    r._cycle_satellite = lambda cid, eq, ms, now: None
+    r._cycle_core = lambda cid, eq, ms, now: None
+    pushed: list[str] = []
+    r.client.update_cookie = pushed.append
+    r._cookie = "old"
+    r._session_stamp = 1.0
+    sessions = iter(
+        [
+            {"cookie": "old", "updated_at": 1.0},  # unchanged: nothing pushed
+            {"cookie": "", "updated_at": 2.0},  # re-login with an empty cookie
+            {"cookie": "", "updated_at": 2.0},  # unchanged again
+            {"cookie": "new", "updated_at": 3.0},
+        ]
+    )
+    monkeypatch.setattr(pr, "read_session", lambda: next(sessions))
+
+    r._cycle()
+    assert pushed == []
+    r._cycle()
+    assert pushed == [""]
+    assert r._cookie == ""
+    r._cycle()
+    assert pushed == [""]
+    r._cycle()
+    assert pushed == ["", "new"]
+    assert r._cookie == "new"
+
+
+def test_cycle_keeps_the_cookie_when_the_session_file_is_missing(tmp_path, monkeypatch):
+    freeze_runner_clock(monkeypatch, FRIDAY_OPEN)
+    r = make_runner(tmp_path, ranked_closes())
+    r._cycle_satellite = lambda cid, eq, ms, now: None
+    r._cycle_core = lambda cid, eq, ms, now: None
+    pushed: list[str] = []
+    r.client.update_cookie = pushed.append
+    r._cookie = "old"
+
+    r._cycle()
+
+    assert pushed == []
+    assert r._cookie == "old"

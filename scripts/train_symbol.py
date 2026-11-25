@@ -58,14 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     name = args.name or default_name(args.symbol, args.kind, sym_cfg.timeframe_label)
 
     session = read_session()
-    if session is None or not session.get("cookie"):
+    # An empty cookie is fine: the gateway holds the session itself.
+    if session is None:
         print("[train] No CPGW session — run `python -m live.cpgw_keeper` first.")
         return 1
 
     print(
         f"[train] CPGW {app_cfg.ib.host}:{app_cfg.ib.port}  symbol={args.symbol}  kind={args.kind}"
     )
-    client = CPGWClient(cookie=session["cookie"], port=app_cfg.ib.port)
+    client = CPGWClient(cookie=str(session.get("cookie") or ""), port=app_cfg.ib.port)
     if session.get("account_id"):
         client.account_id = session["account_id"]
 

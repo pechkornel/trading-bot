@@ -1,5 +1,6 @@
 """Offline checks of the deploy files. They pin the safety properties."""
 
+import ipaddress
 import re
 from fnmatch import fnmatch
 from pathlib import Path
@@ -93,7 +94,7 @@ def test_gateway_is_locked_down():
     gateway = _gateway()
     assert "ALL" in gateway["cap_drop"]
     assert "no-new-privileges:true" in gateway["security_opt"]
-    conf_mounts = [v for v in gateway["volumes"] if v.endswith("/root/conf.yaml:ro")]
+    conf_mounts = [v for v in gateway["volumes"] if v.endswith("/conf.template.yaml:ro")]
     assert len(conf_mounts) == 1
     assert conf_mounts[0].startswith("./docker/gateway/conf.yaml:")
 
@@ -123,7 +124,7 @@ def test_gateway_conf_listens_on_the_paper_port_with_ssl():
 
 def test_gateway_conf_allow_list_is_loopback_and_bridge_only():
     allow = _gateway_conf()["ips"]["allow"]
-    assert allow == ["127.0.0.1", "172.31.250.*"]
+    assert allow == ["127.0.0.1", "172.31.250.1"]
     for entry in allow:
         assert not str(entry).startswith("192.")
         assert entry != "*"
@@ -131,17 +132,82 @@ def test_gateway_conf_allow_list_is_loopback_and_bridge_only():
 
 
 def test_gateway_allow_pattern_matches_the_compose_subnet():
-    prefix = _subnet().split("/")[0].rsplit(".", 1)[0]
-    assert f"{prefix}.*" in _gateway_conf()["ips"]["allow"]
+    network = ipaddress.ip_network(_subnet())
+    bridge = [e for e in _gateway_conf()["ips"]["allow"] if e != "127.0.0.1"]
+    assert bridge == ["172.31.250.1"]
+    assert ipaddress.ip_address(bridge[0]) in network
 
 
-def test_gateway_dockerfile_pins_release_and_hash():
+def test_gateway_hash_file_matches_the_pinned_release():
+    text = _read("docker/gateway/gateway.sha256").strip()
+    assert text == f"{GATEWAY_SHA256}  ibkr-gateway-linux-amd64.zip"
+
+
+def test_gateway_dockerfile_copies_vendored_zip_and_verifies_it():
     text = _read("docker/gateway/Dockerfile")
     assert "GATEWAY_VERSION=v1.0.0" in text
     assert "GATEWAY_ASSET=ibkr-gateway-linux-amd64.zip" in text
-    assert GATEWAY_SHA256 in text
-    assert "sha256sum -c" in text
+    assert "curl -fsSL" not in text
+    assert "releases/download" not in text
+    assert "COPY --from=vendor" in text
+    assert "sha256sum -c gateway.sha256" in text
+    assert "rm -f" in text and "vertx.jks" in text
+    assert "openssl" in text
+    assert 'ENTRYPOINT ["./entrypoint.sh"]' in text
     assert any(line.startswith("USER ") for line in text.splitlines())
+
+
+def test_gateway_compose_build_uses_vendor_context():
+    build = _gateway()["build"]
+    assert build["context"] == "docker/gateway"
+    assert build["additional_contexts"] == {"vendor": "./vendor/ibkr-gateway"}
+
+
+def test_gateway_compose_mounts_secret_tmpfs_and_tls_volume():
+    gateway = _gateway()
+    assert gateway["secrets"] == ["gateway_ssl_password"]
+    assert any(t.startswith("/opt/ibkr-gateway/run:") for t in gateway["tmpfs"])
+    assert "ibkr_gateway_tls:/opt/ibkr-gateway/tls" in gateway["volumes"]
+    compose = _compose()
+    assert compose["secrets"]["gateway_ssl_password"]["file"] == "./secrets/gateway_ssl_password"
+    assert "ibkr_gateway_tls" in compose["volumes"]
+
+
+def test_gateway_conf_takes_ssl_password_from_a_placeholder():
+    assert _gateway_conf()["sslPwd"] == "__SSL_PWD__"
+    assert "mywebapi" not in _read("docker/gateway/conf.yaml")
+
+
+def test_fetch_script_is_strict_and_pinned():
+    text = _read("scripts/fetch_gateway.sh")
+    assert "set -euo pipefail" in text
+    assert "docker/gateway/gateway.sha256" in text
+    assert "vendor/ibkr-gateway" in text
+    assert "unzip" not in text
+    assert "ibkr-gateway-linux-amd64.zip" in text
+    assert "rm -f" in text
+
+
+def _entrypoint_code() -> str:
+    lines = _read("docker/gateway/entrypoint.sh").splitlines()
+    return "\n".join(ln for ln in lines if not ln.lstrip().startswith("#"))
+
+
+def test_entrypoint_never_leaks_the_password():
+    code = _entrypoint_code()
+    assert "set -eu" in code
+    assert "set -x" not in code and "xtrace" not in code
+    assert "-passin file:" in code and "-passout file:" in code
+    assert "-passin pass:" not in code and "-passout pass:" not in code
+    assert "[!0-9A-Za-z]" in code
+    assert not re.search(r"(echo|printf)[^\n]*\$\{?(PW|PASSWORD|SSL_PWD)", code)
+
+
+def test_entrypoint_certificate_covers_localhost_and_loopback_ip():
+    code = _entrypoint_code()
+    assert "subjectAltName=DNS:localhost,IP:127.0.0.1" in code
+    assert "extendedKeyUsage=serverAuth" in code
+    assert "rsa:3072" in code
 
 
 def _ignore_lines(rel: str) -> list[str]:
@@ -181,3 +247,255 @@ def test_gateway_dockerfile_pins_every_base_image_by_digest():
     assert len(froms) == 2
     for line in froms:
         assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64}( AS \w+)?$", line), line
+
+
+MEM_LIMITS = {
+    "ibkr_gateway": "768m",
+    "cpgw_keeper": "640m",
+    "portfolio": "640m",
+    "dashboard": "512m",
+    "sentiment": "256m",
+}
+CA_PATH = "/app/gateway_tls/cert.pem"
+TLS_MOUNT = "ibkr_gateway_tls:/app/gateway_tls:ro"
+
+
+def _mb(value: str) -> int:
+    assert value.endswith("m"), value
+    return int(value[:-1])
+
+
+def test_every_service_has_the_planned_memory_limit_and_no_swap():
+    services = _compose()["services"]
+    assert set(services) == set(MEM_LIMITS)
+    for name, limit in MEM_LIMITS.items():
+        assert services[name]["mem_limit"] == limit, name
+        assert services[name]["memswap_limit"] == limit, name
+
+
+def test_memory_total_of_auto_profile_plus_gateway_fits_the_budget():
+    services = _compose()["services"]
+    names = ["dashboard"] + [
+        n for n, s in services.items() if "auto" in s.get("profiles", []) or n == "ibkr_gateway"
+    ]
+    assert sum(_mb(services[n]["mem_limit"]) for n in names) <= 2560
+
+
+def test_sentiment_moved_to_the_research_profile():
+    assert _compose()["services"]["sentiment"]["profiles"] == ["research"]
+
+
+def test_only_the_keeper_has_the_login_secret_and_keeper_target():
+    compose = _compose()
+    assert compose["secrets"]["ibkr_login"]["file"] == "./secrets/ibkr_login"
+    for name, service in compose["services"].items():
+        has_secret = "ibkr_login" in service.get("secrets", [])
+        assert has_secret == (name == "cpgw_keeper"), name
+        target = service.get("build", {}).get("target")
+        if name == "cpgw_keeper":
+            assert target == "keeper"
+            assert service["image"] == "tradingbot-keeper:local"
+        elif name != "ibkr_gateway":
+            assert target == "app", name
+
+
+def test_keeper_runs_as_uid_1000_to_own_the_secret_file():
+    # core/secret_store.py wants mode 600 and the reading uid as owner. A compose
+    # file secret keeps the host owner, so the container uid must match it.
+    assert str(_compose()["services"]["cpgw_keeper"]["user"]) == "1000:1000"
+    assert re.search(r"useradd[^\n]*--uid 1000 bot", _read("docker/Dockerfile"))
+    assert "uid 1000" in _read("docker-compose.yml")
+
+
+def test_gateway_certificate_reaches_keeper_and_portfolio_read_only():
+    services = _compose()["services"]
+    for name in ("cpgw_keeper", "portfolio"):
+        assert TLS_MOUNT in services[name]["volumes"], name
+    assert not any("gateway_tls" in v for v in services["dashboard"]["volumes"])
+
+
+def test_compose_does_not_force_a_ca_file_on_every_gateway():
+    # A hard-coded CPGW_CA_FILE crash-loops the keeper and the portfolio runner
+    # with the host Java gateway, which writes no /app/gateway_tls/cert.pem.
+    # The path comes from .env (env_file), set only for the native gateway.
+    compose = _compose()
+    for name, service in compose["services"].items():
+        env = service.get("environment", [])
+        assert not any("CPGW_CA_FILE" in str(item) for item in env), name
+    assert ".env" in compose["x-bot-common"]["env_file"]
+
+
+def test_env_example_leaves_the_ca_file_empty_and_documents_the_native_path():
+    text = _read(".env.example")
+    assert "CPGW_CA_FILE=" in text.splitlines()
+    assert CA_PATH in text
+
+
+def test_readme_documents_exporting_the_java_gateway_certificate():
+    text = _read("deploy/README.md")
+    assert "openssl s_client -connect 127.0.0.1:5000" in text
+    assert "subjectAltName" in text or "Subject Alternative Name" in text
+    assert f"CPGW_CA_FILE={CA_PATH}" in text
+
+
+def _dockerfile_stages() -> list[str]:
+    return re.findall(r"^FROM .+ AS (\w+)$", _read("docker/Dockerfile"), flags=re.MULTILINE)
+
+
+def test_dockerfile_has_three_named_stages_with_app_last():
+    assert _dockerfile_stages() == ["deps", "keeper", "app"]
+
+
+def test_keeper_stage_installs_headless_shell_only():
+    text = _read("docker/Dockerfile")
+    keeper = text.split(" AS keeper", 1)[1].split(" AS app", 1)[0]
+    assert "requirements-login.txt" in keeper
+    assert "--only-shell chromium" in keeper
+    assert "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright" in keeper
+    assert "playwright" not in text.split(" AS app", 1)[1].lower()
+
+
+def test_no_deploy_file_mentions_live_wildcard_password_or_xvfb():
+    for rel in ("docker-compose.yml", "docker/Dockerfile"):
+        text = _read(rel).lower()
+        for banned in ("--live", "0.0.0.0", "ibkr_password", "xvfb"):
+            assert banned not in text, (rel, banned)
+
+
+def test_deploy_files_have_no_em_or_en_dashes():
+    for rel in ("docker-compose.yml", "docker/Dockerfile", ".env.example"):
+        text = _read(rel)
+        assert "—" not in text and "–" not in text, rel
+
+
+def test_env_example_has_no_password_and_lists_the_new_variables():
+    text = _read(".env.example")
+    assert "IBKR_PASSWORD" not in text and "IBKR_USERNAME" not in text
+    lines = text.splitlines()
+    for expected in (
+        "TELEGRAM_BOT_TOKEN=",
+        "TELEGRAM_CHAT_ID=",
+        "IBKR_LOGIN_SECRET_FILE=",
+        "CPGW_CA_FILE=",
+    ):
+        assert expected in lines
+
+
+def _phase1_section() -> str:
+    text = _read("deploy/README.md")
+    match = re.search(r"^## [^\n]*Phase 1 upgrade \(paper account only\)[^\n]*$", text, re.M)
+    assert match, "deploy/README.md has no Phase 1 upgrade section"
+    rest = text[match.end() :]
+    nxt = re.search(r"^## ", rest, re.M)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_phase1_section_starts_with_a_backup_and_never_uses_live():
+    section = _phase1_section()
+    first_compose = section.find("docker compose")
+    assert first_compose != -1
+    backup = section.find("deploy/backup.sh")
+    assert backup != -1 and backup < first_compose
+    assert "--live" not in section
+    assert "uv run" not in section and "uv sync" not in section
+    assert "—" not in section and "–" not in section
+
+
+def test_keeper_drops_capabilities_like_the_gateway():
+    services = _compose()["services"]
+    keeper = services["cpgw_keeper"]
+    assert keeper["cap_drop"] == ["ALL"]
+    assert keeper["security_opt"] == ["no-new-privileges:true"]
+    assert keeper["cap_drop"] == services["ibkr_gateway"]["cap_drop"]
+    assert keeper["security_opt"] == services["ibkr_gateway"]["security_opt"]
+
+
+def test_fetch_gateway_curl_forces_https_and_tls12():
+    curl_lines = [
+        line for line in _read("scripts/fetch_gateway.sh").splitlines() if line.startswith("curl ")
+    ]
+    assert curl_lines
+    for line in curl_lines:
+        assert "--proto '=https'" in line
+        assert "--tlsv1.2" in line
+
+
+LOGIN_IN_ENV = re.compile(r"^\s*(Environment=)?IBKR_(USERNAME|PASSWORD)\s*=", re.MULTILINE)
+
+
+def _deploy_files() -> list[str]:
+    units = sorted(p.name for p in (ROOT / "deploy" / "systemd").glob("*.service"))
+    return ["deploy/README.md", "deploy/UBUNTU_SETUP.md", *[f"deploy/systemd/{u}" for u in units]]
+
+
+def test_no_deploy_file_puts_the_login_in_env():
+    # The login lives in secrets/ibkr_login. A sample .env line with it would
+    # also trip the keeper's refusal to start while IBKR_PASSWORD is set.
+    for rel in _deploy_files():
+        assert not LOGIN_IN_ENV.search(_read(rel)), rel
+
+
+def test_systemd_keeper_unit_uses_the_secret_file_and_the_env_file_for_the_ca():
+    unit = _read("deploy/systemd/tradingbot-cpgw-keeper.service")
+    assert "Environment=IBKR_LOGIN_SECRET_FILE=/opt/trading-bot/secrets/ibkr_login" in unit
+    assert "EnvironmentFile=/opt/trading-bot/.env" in unit
+    assert "IBKR_PASSWORD" not in unit
+
+
+def test_ubuntu_setup_explains_the_keeper_login_prerequisites():
+    text = _read("deploy/UBUNTU_SETUP.md")
+    assert "secrets/ibkr_login" in text
+    assert "chmod 600 secrets/ibkr_login" in text
+    assert "requirements-login.txt" in text
+    assert "playwright install --with-deps --only-shell chromium" in text
+    assert "CPGW_CA_FILE" in text
+    assert "xvfb" not in text.lower()
+
+
+def _readme_section(heading_re: str) -> str:
+    text = _read("deploy/README.md")
+    match = re.search(heading_re, text, re.M)
+    assert match, heading_re
+    rest = text[match.end() :]
+    nxt = re.search(r"^## ", rest, re.M)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_readme_0b_step_references_point_to_the_right_headings():
+    text = _read("deploy/README.md")
+    steps = dict(
+        (int(n), title)
+        for n, title in re.findall(r"^### (\d+)\. ([^\n]+)$", _phase1_section_text(text), re.M)
+    )
+    for n, word in ((16, "Sentiment"), (15, "Lockout")):
+        assert word in steps[n], (n, steps[n])
+    for n in map(int, re.findall(r"0B step (\d+)", text)):
+        assert n in steps
+    assert "see section 0B step 16)" in text
+    assert "section 0B step 15." in text
+
+
+def test_readme_names_the_rendered_gateway_conf_path():
+    text = _read("deploy/README.md")
+    assert "../root/conf.yaml" not in text.replace("`./bin/run.sh root/conf.yaml", "")
+    assert "--conf ../run/conf.yaml" in text
+
+
+def _phase1_section_text(text: str) -> str:
+    start = text.index("## 0B. Phase 1 upgrade")
+    return text[start : text.index("\n## 1. Get the code", start)]
+
+
+def test_both_install_paths_fetch_the_gateway_before_the_first_gateway_build():
+    sections = {
+        "0A": _readme_section(r"^## 0A\. Home server \(Docker\)$"),
+        "0B": _phase1_section(),
+    }
+    for name, section in sections.items():
+        fetch = section.find("scripts/fetch_gateway.sh")
+        build = section.find("up -d --build ibkr_gateway")
+        assert fetch != -1, name
+        assert build != -1, name
+        assert fetch < build, name
+        # the password secret must also exist before the first gateway start
+        assert "secrets/gateway_ssl_password" in section[:build], name
