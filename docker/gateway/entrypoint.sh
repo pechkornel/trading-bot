@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepares the gateway's own TLS key, keystore and config, then starts it.
+# Prepares the gateway's own TLS key and keystore, then starts it.
 # The password is read from a Docker secret. It is never printed, never put on
 # a command line (openssl reads it with -passin file: and -passout file:), and
 # this script never enables shell tracing.
@@ -10,7 +10,6 @@ PWD_FILE=/run/secrets/gateway_ssl_password
 BASE=/opt/ibkr-gateway
 TLS="$BASE/tls"
 RUN="$BASE/run"
-TEMPLATE="$BASE/conf.template.yaml"
 
 fail() {
     echo "entrypoint: $1" >&2
@@ -18,7 +17,6 @@ fail() {
 }
 
 [ -r "$PWD_FILE" ] || fail "cannot read $PWD_FILE (the secret must be readable by uid 10001)"
-[ -r "$TEMPLATE" ] || fail "cannot read $TEMPLATE"
 
 PW=$(cat "$PWD_FILE")
 case "$PW" in
@@ -49,16 +47,24 @@ else
         fail "password does not match the keystore, remove the ibkr_gateway_tls volume to regenerate"
 fi
 
-cp "$TLS/keystore.p12" "$RUN/vertx.jks"
-# The password goes through the environment of awk only, not its arguments.
-PW="$PW" awk '{ gsub(/__SSL_PWD__/, ENVIRON["PW"]); print }' "$TEMPLATE" >"$RUN/conf.yaml"
-chmod 0600 "$RUN/conf.yaml" "$RUN/vertx.jks"
 unset PW
+
+# The native build ignores --conf and always uses the conf.yaml compiled into it
+# (IBKR's default): sslCert "vertx.jks" in the working directory, sslPwd "mywebapi",
+# and the allow list 192.*, 131.216.*, 127.0.0.1 (ADR 0004). So the gateway gets a
+# copy of our own key under that public password. The password protects nothing; what
+# matters is that the key is ours and not IBKR's public one. The copy is mode 600 and
+# owned by this uid. The unencrypted key exists only briefly on the tmpfs.
+openssl pkcs12 -in "$TLS/keystore.p12" -passin file:"$PWD_FILE" -nodes -out "$RUN/bundle.pem"
+openssl pkcs12 -export -in "$RUN/bundle.pem" -name vertx -passout pass:mywebapi \
+    -out "$BASE/vertx.jks.new"
+rm -f "$RUN/bundle.pem"
+chmod 0600 "$BASE/vertx.jks.new"
+mv "$BASE/vertx.jks.new" "$BASE/vertx.jks"
 
 exec ./ibkr-gateway \
     -Dvertx.disableDnsResolver=true \
     -Djava.net.preferIPv4Stack=true \
     -Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory \
     -Dnologback.statusListenerClass=ch.qos.logback.core.status.OnConsoleStatusListener \
-    -Dnolog4j.debug=true -Dnolog4j2.debug=true \
-    --conf ../run/conf.yaml
+    -Dnolog4j.debug=true -Dnolog4j2.debug=true

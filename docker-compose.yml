@@ -171,7 +171,6 @@ services:
     tmpfs:
       - /opt/ibkr-gateway/run:uid=10001,gid=10001,mode=0700,size=1m
     volumes:
-      - ./docker/gateway/conf.yaml:/opt/ibkr-gateway/conf.template.yaml:ro
       - ibkr_gateway_tls:/opt/ibkr-gateway/tls
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -180,7 +179,11 @@ networks:
   ibkr_gateway:
     ipam:
       config:
-        - subnet: 172.31.250.0/24
+        # The native gateway always uses its built-in allow list (192.*, 131.216.*,
+        # 127.0.0.1) and ignores any config file. Docker's proxy reaches it from the
+        # bridge address 192.168.250.1, which 192.* admits. The port stays published
+        # on 127.0.0.1 only, so the LAN cannot connect (ADR 0004).
+        - subnet: 192.168.250.0/24
 
 volumes:
   ibkr_gateway_tls:

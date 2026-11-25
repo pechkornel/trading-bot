@@ -167,7 +167,7 @@ curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:5000/
 ```
 
 - Any HTTP code (for example 200 or 302) means the gateway answers. Then check the body: `curl -sk https://127.0.0.1:5000/ | head -c 300`.
-- If the body text is "Access Denied", the gateway ignored the mounted `docker/gateway/conf.yaml` (this behaviour of the pinned build is not verified yet). The status code alone does not show this, so read the body. Run `docker compose --profile gateway down` and stop. Nothing is exposed. Report it before going on.
+- If the body text is "Access Denied", the gateway refused the source address. The native gateway always uses its built-in allow list (`192.*`, `131.216.*`, `127.0.0.1`, see ADR 0004), and Docker's proxy should arrive from the bridge address `192.168.250.1`. The status code alone does not show this, so read the body. Run `docker compose --profile gateway down` and stop. Nothing is exposed. Report it before going on.
 - `000` or "Failed to connect" means nothing answers on 127.0.0.1:5000. Check `docker compose ps ibkr_gateway` and the logs.
 - Mandatory check from a second machine. Laptop, on the same LAN or tailnet:
 
@@ -287,9 +287,9 @@ Run `git checkout main` later to leave the detached state.
 ### Troubleshooting
 
 - "Access Denied" from the gateway: see step 5.
-- The gateway restarts in a loop: run `docker compose logs ibkr_gateway`. One likely cause is that the unverified `--conf ../run/conf.yaml` path is wrong for the pinned build. Report the last log lines, run `docker compose --profile gateway down`, and fall back to the Java gateway (see Rollback).
+- The gateway restarts in a loop: run `docker compose logs ibkr_gateway`. `Failed to load configuration file` means an old image that still passes `--conf`: run `git pull` and rebuild with `--build`. For anything else, report the last log lines, run `docker compose --profile gateway down`, and fall back to the Java gateway (see Rollback).
 - The gateway exits with code 132 or "Illegal instruction": the CPU lacks AVX2. Use the Java gateway.
-- `Pool overlaps` when compose creates the network: another Docker network uses 172.31.250.0/24. Change the subnet in `docker-compose.yml` and the allow pattern in `docker/gateway/conf.yaml` together. The tests check that they match.
+- `Pool overlaps` when compose creates the network: another Docker network or your LAN uses 192.168.250.0/24. Pick another `192.168.x.0/24` in `docker-compose.yml` (it must start with `192.` so the gateway's built-in allow list admits Docker's proxy) and update `tests/test_deploy_config.py`.
 - Permission errors in `logs/`: `sudo chown 1000:1000 logs`.
 - Keeper `ModuleNotFoundError`: the private module needs a package that is not in `requirements.txt` or `requirements-login.txt`. Add it and rebuild.
 - The keeper refuses to start and mentions `IBKR_PASSWORD`: remove `IBKR_USERNAME` and `IBKR_PASSWORD` from `.env` (and from the environment of the container). The login is read from `secrets/ibkr_login` only.
@@ -451,7 +451,7 @@ docker compose --profile gateway logs ibkr_gateway
 
 Wait until `ps` shows `healthy`.
 
-Check 4, TLS from the generated keystore. The entrypoint creates the gateway's own RSA key and a PKCS12 keystore (alias `vertx`) and copies it to a file named `vertx.jks`. IBKR's default `vertx.jks` is deleted in the image, so the gateway cannot fall back to the public key. Whether the native gateway accepts a PKCS12 file under the name `vertx.jks` is not verified until now.
+Check 4, TLS from the generated keystore. The entrypoint creates the gateway's own RSA key and a PKCS12 keystore (alias `vertx`) in the volume, encrypted with your secret. On every start it writes a copy to `/opt/ibkr-gateway/vertx.jks` under the gateway's built-in password, because the native gateway can only open it with that (ADR 0004). IBKR's default `vertx.jks` is deleted in the image. A test on the server confirmed that the gateway serves the key from that file.
 
 ```bash
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:5000/
@@ -461,17 +461,17 @@ docker compose --profile gateway exec ibkr_gateway cat tls/cert.pem | openssl x5
 
 Look for: a normal HTTP code (200 or 302, not `000`), and two identical SHA256 fingerprints. Identical means the gateway serves its own new certificate, not IBKR's default. If the container is unhealthy or restarts in a loop, TLS did not start. That fails closed: nothing is exposed. Run the stop command from step 3 and report the log lines. The fallback is a follow-up task, a real JKS keystore built with `keytool` in a one-off container. Do not bring back IBKR's default keystore.
 
-Check 5, the config paths. The entrypoint renders `docker/gateway/conf.yaml` into a tmpfs file and starts the gateway with `--conf ../run/conf.yaml`. The relative `sslCert: "vertx.jks"` is expected to resolve next to that file. Both are unverified for the pinned build, like `--conf` was in ADR 0001.
+Check 5, the built-in config. The native gateway ignores config files and always uses the config compiled into it, so there is no `conf.yaml` to mount and no `--conf` flag (ADR 0004).
 
-Look for: no config, keystore or file-not-found error in `docker compose --profile gateway logs ibkr_gateway`, plus the check 4 results above. If the gateway ignores the config, it denies your requests (see check 6). If a path is wrong, it fails to start. Both fail closed. Stop and report.
+Look for: no keystore, `Failed to load configuration file` or file-not-found error in `docker compose --profile gateway logs ibkr_gateway`, plus the check 4 results above. If it fails to start, nothing is exposed. Stop and report.
 
-Check 6, the allow list. Docker's proxy delivers every connection to the published port from the bridge gateway address `172.31.250.1`, and the container's own healthcheck comes from `127.0.0.1`. The list allows exactly those two. The keeper runs on the host network and reaches the gateway at `127.0.0.1:5000`, so it arrives from `172.31.250.1` too.
+Check 6, the allow list. The built-in list allows `192.*`, `131.216.*` and `127.0.0.1`. Docker's proxy delivers every connection to the published port from the bridge gateway address `192.168.250.1`, which `192.*` admits, and the container's own healthcheck comes from `127.0.0.1`. The keeper runs on the host network and reaches the gateway at `127.0.0.1:5000`, so it arrives from `192.168.250.1` too. The LAN cannot connect because the port is published on `127.0.0.1` only (the laptop check below confirms it).
 
 ```bash
 curl -sk https://127.0.0.1:5000/ | head -c 300
 ```
 
-Look for: login page HTML, not "Access Denied". If you see "Access Denied", the gateway log or its access output should show the source address. If that address is not `172.31.250.1`, stop. Widening the list to `172.31.250.*` is your own decision, not a step here. It means editing `docker/gateway/conf.yaml` and the test that pins the list, in a separate commit.
+Look for: login page HTML, not "Access Denied". If you see "Access Denied", the source address was not admitted (the gateway logs `ipv4 address {} is forbidden`). Check that `docker network inspect trading-bot_ibkr_gateway` shows the subnet `192.168.250.0/24`, then stop and report.
 
 Check 7, the certificate in the volume. The keeper reads `/app/gateway_tls/cert.pem` from the named volume. Compose prefixes the volume name with the project name (the folder name, so usually `trading-bot_ibkr_gateway_tls`).
 
