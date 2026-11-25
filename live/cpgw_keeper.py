@@ -643,16 +643,18 @@ class Keeper:
 
     def _finish_login(self, cookie: str) -> str:
         self.client.update_cookie(cookie)
+        # Start the brokerage session first: the gateway reports authenticated only
+        # after ssodh_init (seen on the server). A failure here shows in the check below.
+        try:
+            self.client.ssodh_init()
+        except Exception as e:  # noqa: BLE001
+            self._event("warn", f"ssodh_init warning: {e}")
         try:
             status = self.client.auth_status() or {}
         except Exception as e:  # noqa: BLE001
             raise IBKRAuthError(f"cannot confirm the login ({type(e).__name__})") from None
         if not status.get("authenticated"):
             raise IBKRAuthError("login finished but the gateway is not authenticated")
-        try:
-            self.client.ssodh_init()
-        except Exception as e:  # noqa: BLE001
-            self._event("warn", f"ssodh_init warning: {e}")
         account = self._paper_guard()
         try:
             self.client.bootstrap()
