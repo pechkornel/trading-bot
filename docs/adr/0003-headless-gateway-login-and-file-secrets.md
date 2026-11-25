@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. The gateway config, allow list and `--conf` parts are replaced by ADR 0004.
 
 ## Context
 
