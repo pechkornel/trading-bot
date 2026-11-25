@@ -591,10 +591,13 @@ Check 10 is part of this step.
 First, the cookie-less 401 check. Before the first automatic login, find out how the gateway answers a request that carries no cookie. The keeper reads a cookie-less 401 as "nobody is logged in". That is only safe when the gateway session is gateway-wide. Log in once by hand in a browser (or use a gateway that is already authenticated), then run this on the Ubuntu server:
 
 ```bash
-curl -sk -X POST https://127.0.0.1:5000/v1/api/iserver/auth/status
+curl -sk -X POST -d '' -w '\nHTTP %{http_code}\n' https://127.0.0.1:5000/v1/api/iserver/auth/status
 ```
 
-- It reports `"authenticated":true`: keep the default (`cookieless_401_means_logged_out: true` in `config/symbols.yaml`).
+The `-d ''` matters: a POST without a body gets `411` from the gateway or "Bad Request" from IBKR's CDN, which says nothing about the session.
+
+- It answers HTTP 200 (`"authenticated"` may still be `false` until the keeper starts the brokerage session with `ssodh/init`): the session is gateway-wide, keep the default (`cookieless_401_means_logged_out: true` in `config/symbols.yaml`). Seen on the home server on 2026-11-25.
+- If the gateway log shows `sso/validate ... 401 ... Access Denied` and `CP_LOGIN_FAILED` right after `Client login succeeds`, IBKR refused the session. On the first login from a new device or location IBKR asks for an email verification first: log in once on IBKR's own website, enter the emailed code, then try again.
 - It returns 401 while you are logged in: set `cookieless_401_means_logged_out: false` in the `keeper:` block of `config/symbols.yaml`. A cookie-less 401 then counts as "unsure": the keeper never submits on it and alerts after repeated unsure checks. Then expect to log in by hand after a session loss, because the keeper cannot tell a lost session from a cookie-bound one.
 
 ```bash

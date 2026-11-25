@@ -53,6 +53,9 @@ class FakeClient:
         self.down = False
         self.accounts = [{"id": "DU1234567"}]
         self.calls: list[str] = []
+        # Like the real gateway (seen on the server): after the login page succeeds,
+        # auth/status stays false until /iserver/auth/ssodh/init starts the session.
+        self.authenticate_on_ssodh = False
 
     def _check(self) -> None:
         if self.down:
@@ -73,6 +76,8 @@ class FakeClient:
     def ssodh_init(self, **kw):
         self.calls.append("ssodh_init")
         self._check()
+        if self.authenticate_on_ssodh:
+            self.authenticated = True
         return {}
 
     def list_accounts(self):
@@ -150,7 +155,8 @@ class Env:
         item = self.login_script.pop(0) if self.login_script else FAKE_COOKIE
         if isinstance(item, BaseException):
             raise item
-        self.client.authenticated = True
+        if not self.client.authenticate_on_ssodh:
+            self.client.authenticated = True
         return item
 
     def keeper(self, *, once=False, cfg=None) -> Keeper:
@@ -261,6 +267,22 @@ def test_drop_then_success_writes_session_and_sends_one_info_alert(env):
     assert st.consecutive_failures == 0
     assert st.failed_attempts == []
     assert st.authenticated_since == env.clock.now
+
+
+def test_login_starts_the_brokerage_session_before_it_checks_authentication(env):
+    # Regression: the keeper required authenticated:true before calling ssodh_init, but
+    # the gateway only reports authenticated after ssodh_init. Every first login would
+    # have failed and counted against the lockout.
+    env.client.authenticate_on_ssodh = True
+    keeper = env.keeper()
+    keeper.tick()
+    assert env.login_calls == 1
+    assert env.state().locked_out_reason is None
+    assert env.state().failed_attempts == []
+    assert json.loads(env.session_file.read_text())["account_id"] == "DU1234567"
+    calls = env.client.calls
+    last_init = len(calls) - 1 - calls[::-1].index("ssodh_init")
+    assert "auth_status" in calls[last_init + 1 :]
 
 
 def test_empty_cookie_is_allowed(env):

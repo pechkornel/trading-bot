@@ -336,6 +336,40 @@ def playwright_page(config: GatewayLoginConfig, pin: str) -> Iterator[_Playwrigh
                     browser.close()
 
 
+def _confirm_session(
+    make_client: Callable[[], object],
+    *,
+    timeout_sec: float,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
+    """Return True once the gateway API reports an authenticated session.
+
+    After the login page succeeds, this gateway reports `authenticated: false` until the
+    brokerage session is started with `/iserver/auth/ssodh/init` (seen on the server).
+    So when the status is still false, start the session and ask again. Gateway errors
+    count as "not yet"; after `timeout_sec` the answer is False."""
+    from core.cpgw_client import CPGWError
+
+    deadline = clock() + timeout_sec
+    while True:
+        client = make_client()
+        try:
+            try:
+                if client.auth_status().get("authenticated"):
+                    return True
+                client.ssodh_init()
+                if client.auth_status().get("authenticated"):
+                    return True
+            except CPGWError:
+                pass
+        finally:
+            client.close()
+        if clock() >= deadline:
+            return False
+        sleep(2.0)
+
+
 def login_via_gateway_page(
     creds: IbkrCredentials,
     *,
@@ -358,26 +392,17 @@ def login_via_gateway_page(
         config = replace(config, base_url=f"https://127.0.0.1:{port}")
     _require_local(config.base_url)
 
-    from core.cpgw_client import CPGWClient, CPGWError
+    from core.cpgw_client import CPGWClient
 
     with playwright_page(config, pin) as pw_page:
 
         def is_authenticated() -> bool:
-            deadline = time.monotonic() + config.api_timeout_sec
-            while True:
-                client = CPGWClient(
+            return _confirm_session(
+                lambda: CPGWClient(
                     pw_page.cookie_header(), port=port, host="127.0.0.1", ca_file=config.cert_file
-                )
-                try:
-                    if client.auth_status().get("authenticated"):
-                        return True
-                except CPGWError:
-                    pass
-                finally:
-                    client.close()
-                if time.monotonic() >= deadline:
-                    return False
-                time.sleep(2.0)
+                ),
+                timeout_sec=config.api_timeout_sec,
+            )
 
         run_login_flow(
             pw_page,

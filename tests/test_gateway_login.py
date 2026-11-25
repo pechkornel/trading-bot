@@ -607,3 +607,69 @@ def test_markers_ignore_hidden_elements():
 def test_markers_report_the_first_visible_one():
     page = _adapter({"2fa": [False, False], "ok": [False, True]})
     assert page.wait_for_first({"second_factor": "2fa", "success": "ok"}, 1.0) == "success"
+
+
+# --- Session confirmation after the login page ------------------------------------------
+
+
+class _SessionClient:
+    """auth/status says false until ssodh_init, like the real gateway after a login."""
+
+    def __init__(self, world):
+        self.world = world
+
+    def auth_status(self):
+        self.world["calls"].append("auth_status")
+        if self.world.get("status_error"):
+            from core.cpgw_client import CPGWError
+
+            raise CPGWError("HTTP 500")
+        return {"authenticated": self.world["authenticated"]}
+
+    def ssodh_init(self):
+        self.world["calls"].append("ssodh_init")
+        if self.world.get("init_error"):
+            from core.cpgw_client import CPGWError
+
+            raise CPGWError("invalid challenge")
+        if self.world.get("init_works", True):
+            self.world["authenticated"] = True
+        return {}
+
+    def close(self):
+        self.world["calls"].append("close")
+
+
+def _confirm(world, timeout=0.0):
+    ticks = iter(range(1000))
+    return gateway_login._confirm_session(
+        lambda: _SessionClient(world),
+        timeout_sec=timeout,
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+    )
+
+
+def test_confirm_starts_the_session_when_status_is_still_false():
+    world = {"authenticated": False, "calls": []}
+    assert _confirm(world) is True
+    assert world["calls"][:3] == ["auth_status", "ssodh_init", "auth_status"]
+
+
+def test_confirm_does_not_start_a_session_that_is_already_up():
+    world = {"authenticated": True, "calls": []}
+    assert _confirm(world) is True
+    assert "ssodh_init" not in world["calls"]
+
+
+def test_confirm_gives_up_when_the_session_never_starts():
+    world = {"authenticated": False, "init_works": False, "calls": []}
+    assert _confirm(world, timeout=3) is False
+    assert world["calls"].count("ssodh_init") >= 2
+    assert world["calls"].count("close") == world["calls"].count("ssodh_init")
+
+
+@pytest.mark.parametrize("key", ["init_error", "status_error"])
+def test_confirm_treats_gateway_errors_as_not_confirmed(key):
+    world = {"authenticated": False, key: True, "calls": []}
+    assert _confirm(world) is False
