@@ -115,19 +115,18 @@
 - **Gateway keystore.** IBKR's default `vertx.jks` is public and is deleted from the image.
   The entrypoint generates the gateway's own RSA 3072 key and a PKCS12 keystore on first
   start and stores it, with `cert.pem`, in the `ibkr_gateway_tls` volume. The key password is
-  the `gateway_ssl_password` secret (letters and digits, 32 to 128 characters). It is passed
-  to openssl as files, never on a command line, and rendered into a tmpfs config file (mode
-  600) that is gone when the container stops. The keystore is a PKCS12 file named `vertx.jks`.
-  Whether the native gateway accepts that is confirmed on the server. If not, TLS does not
-  start and nothing is exposed. A real JKS from `keytool` is the follow-up. The entrypoint
-  never regenerates the key when the password does not match.
-- **Gateway config and allow list.** The entrypoint renders `docker/gateway/conf.yaml` and
-  starts the gateway with `--conf ../run/conf.yaml`. The allow list is exactly `127.0.0.1`
-  (the container healthcheck) and `172.31.250.1` (Docker's proxy address on the bridge).
-  Whether the native binary honours `--conf` and the relative keystore path is confirmed on
-  the server. If it ignores them, requests are denied, so nothing is exposed. "Access Denied"
-  from `curl -sk https://127.0.0.1:5000/` means exactly that. CORS stays IBKR's default
-  (`origin.allowed: "*"`).
+  the `gateway_ssl_password` secret (letters and digits, 32 to 128 characters), passed to
+  openssl as a file, never on a command line. The native gateway can only open a keystore
+  with its built-in password `mywebapi`, so on every start the entrypoint writes a copy to
+  `/opt/ibkr-gateway/vertx.jks` under that public password (mode 600, uid 10001). That
+  password protects nothing; TLS is safe because the key is our own, not IBKR's public one
+  (ADR 0004). The entrypoint never regenerates the key when the secret does not match.
+- **Gateway config and allow list.** The native binary ignores config files and always uses
+  IBKR's default config compiled into it (ADR 0004). Its allow list is `192.*`, `131.216.*`
+  and `127.0.0.1`. The bridge network is `192.168.250.0/24`, so Docker's proxy arrives from
+  `192.168.250.1` and is admitted. The real boundary is the port published on `127.0.0.1`
+  only: the LAN cannot reach it (Docker 28 or newer), and the gateway is the only container
+  on its bridge. CORS stays IBKR's default (`origin.allowed: "*"`).
 - **Gateway certificate checks.** When `CPGW_CA_FILE` is set (set in `.env` for the
   Docker gateway, never hard-coded in compose), `CPGWClient` verifies the gateway certificate against that file
   with host name checking. A set but missing file is an error. If unset (host Java gateway),

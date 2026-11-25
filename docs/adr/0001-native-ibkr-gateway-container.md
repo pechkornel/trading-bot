@@ -1,6 +1,6 @@
 # 0001. Run the IBKR gateway as a native executable in a container
 
-Status: Accepted (2026-11-24). Reversible, see Consequences.
+Status: Accepted (2026-11-24). Reversible, see Consequences. The config, allow list and `--conf` parts are replaced by ADR 0004.
 
 ## Context
 

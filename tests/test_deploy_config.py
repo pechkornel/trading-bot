@@ -73,8 +73,14 @@ def _gateway() -> dict:
     return _compose()["services"]["ibkr_gateway"]
 
 
-def _gateway_conf() -> dict:
-    return yaml.safe_load(_read("docker/gateway/conf.yaml"))
+# The native build ignores --conf and always uses the conf.yaml compiled into it
+# (IBKR's default, ADR 0004). Its allow list, as found in the v1.0.0 binary:
+BUILTIN_ALLOW = ("192.*", "131.216.*", "127.0.0.1")
+BUILTIN_SSL_PWD = "mywebapi"
+
+
+def _allowed_by_builtin_list(address: str) -> bool:
+    return any(fnmatch(address, pattern) for pattern in BUILTIN_ALLOW)
 
 
 def _subnet() -> str:
@@ -94,9 +100,12 @@ def test_gateway_is_locked_down():
     gateway = _gateway()
     assert "ALL" in gateway["cap_drop"]
     assert "no-new-privileges:true" in gateway["security_opt"]
-    conf_mounts = [v for v in gateway["volumes"] if v.endswith("/conf.template.yaml:ro")]
-    assert len(conf_mounts) == 1
-    assert conf_mounts[0].startswith("./docker/gateway/conf.yaml:")
+
+
+def test_gateway_mounts_no_config_file():
+    # The binary would ignore it, so a mounted conf.yaml only misleads (ADR 0004).
+    assert not any("conf" in str(v) for v in _gateway()["volumes"])
+    assert not (ROOT / "docker/gateway/conf.yaml").exists()
 
 
 def test_no_service_publishes_a_port_beyond_loopback():
@@ -112,30 +121,24 @@ def test_bot_services_keep_host_network():
 
 
 def test_gateway_network_subnet_is_pinned():
-    assert _subnet() == "172.31.250.0/24"
+    assert _subnet() == "192.168.250.0/24"
 
 
-def test_gateway_conf_listens_on_the_paper_port_with_ssl():
-    conf = _gateway_conf()
-    assert conf["listenPort"] == 5000
-    assert conf["listenPort"] in PAPER_PORTS
-    assert conf["listenSsl"] is True
-
-
-def test_gateway_conf_allow_list_is_loopback_and_bridge_only():
-    allow = _gateway_conf()["ips"]["allow"]
-    assert allow == ["127.0.0.1", "172.31.250.1"]
-    for entry in allow:
-        assert not str(entry).startswith("192.")
-        assert entry != "*"
-        assert "0.0.0.0" not in entry
-
-
-def test_gateway_allow_pattern_matches_the_compose_subnet():
+def test_gateway_bridge_address_is_admitted_by_the_builtin_allow_list():
+    # Docker's proxy delivers every connection to the published port from the bridge
+    # gateway, the first host of the subnet. The built-in list must admit it, or every
+    # request gets "Access Denied" (seen on the server with 172.31.250.0/24).
     network = ipaddress.ip_network(_subnet())
-    bridge = [e for e in _gateway_conf()["ips"]["allow"] if e != "127.0.0.1"]
-    assert bridge == ["172.31.250.1"]
-    assert ipaddress.ip_address(bridge[0]) in network
+    assert network.is_private
+    bridge = str(next(network.hosts()))
+    assert bridge == "192.168.250.1"
+    assert _allowed_by_builtin_list(bridge)
+    assert not _allowed_by_builtin_list("172.31.250.1")
+
+
+def test_gateway_listens_on_the_paper_port():
+    assert _gateway()["ports"] == ["127.0.0.1:5000:5000"]
+    assert 5000 in PAPER_PORTS
 
 
 def test_gateway_hash_file_matches_the_pinned_release():
@@ -173,9 +176,22 @@ def test_gateway_compose_mounts_secret_tmpfs_and_tls_volume():
     assert "ibkr_gateway_tls" in compose["volumes"]
 
 
-def test_gateway_conf_takes_ssl_password_from_a_placeholder():
-    assert _gateway_conf()["sslPwd"] == "__SSL_PWD__"
-    assert "mywebapi" not in _read("docker/gateway/conf.yaml")
+def test_entrypoint_starts_the_gateway_without_a_config_flag():
+    # --conf makes the native build look for a compiled-in resource and exit with
+    # "Failed to load configuration file ... Stream closed" (seen on the server).
+    code = _entrypoint_code()
+    assert "--conf" not in code
+    assert "conf.template.yaml" not in code
+    assert "exec ./ibkr-gateway" in code
+
+
+def test_entrypoint_gives_the_gateway_our_key_under_the_builtin_password():
+    code = _entrypoint_code()
+    # The built-in sslCert is "vertx.jks" in the working directory /opt/ibkr-gateway.
+    assert 'mv "$BASE/vertx.jks.new" "$BASE/vertx.jks"' in code
+    assert f"-passout pass:{BUILTIN_SSL_PWD}" in code
+    # Our keystore in the volume stays protected by the secret.
+    assert '-in "$TLS/keystore.p12" -passin file:"$PWD_FILE"' in code
 
 
 def test_fetch_script_is_strict_and_pinned():
@@ -198,7 +214,9 @@ def test_entrypoint_never_leaks_the_password():
     assert "set -eu" in code
     assert "set -x" not in code and "xtrace" not in code
     assert "-passin file:" in code and "-passout file:" in code
-    assert "-passin pass:" not in code and "-passout pass:" not in code
+    assert "-passin pass:" not in code
+    # The only literal password is the public built-in one, never the secret.
+    assert re.findall(r"-passout pass:(\S+)", code) == [BUILTIN_SSL_PWD]
     assert "[!0-9A-Za-z]" in code
     assert not re.search(r"(echo|printf)[^\n]*\$\{?(PW|PASSWORD|SSL_PWD)", code)
 
@@ -475,10 +493,12 @@ def test_readme_0b_step_references_point_to_the_right_headings():
     assert "section 0B step 15." in text
 
 
-def test_readme_names_the_rendered_gateway_conf_path():
+def test_readme_matches_the_builtin_gateway_config():
     text = _read("deploy/README.md")
-    assert "../root/conf.yaml" not in text.replace("`./bin/run.sh root/conf.yaml", "")
-    assert "--conf ../run/conf.yaml" in text
+    assert "--conf ../run/conf.yaml" not in text
+    assert "docker/gateway/conf.yaml" not in text
+    assert "172.31.250" not in text
+    assert "192.168.250.1" in text
 
 
 def _phase1_section_text(text: str) -> str:
