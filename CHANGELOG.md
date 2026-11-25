@@ -30,7 +30,7 @@ All notable changes to this project are documented here. The format follows
 - `pyproject.toml` with ruff and pytest settings. `core/ibkr_auth.py` is excluded from ruff (#4).
 - `.gitattributes` that forces LF line endings.
 - ruff 0.17.4, pinned in `requirements-dev.txt`.
-- Offline test suite (972 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
+- Offline test suite (981 tests) for scoring, the core and sentiment satellite sleeves, signal fusion, position sizing, Alpha Vantage sentiment parsing (hand-built fixture) and the paper lock. A `conftest.py` blocks network access and isolates `.env` (#4).
 - Account equity sizing: each cycle sizes the sleeves from the paper account's net liquidation and logs one `equity:` event. New `portfolio` keys `use_account_equity`, `equity_min_ratio`, `equity_max_ratio`, `equity_max_step`, `equity_last_max_age_sec` and `equity_currency` (#20).
 - The control page shows the last net liquidation next to the starting equity (#20).
 - GitHub Actions CI on Python 3.11 and 3.12. It runs on push to main, on pull requests, weekly and on manual dispatch. The README has a status badge. Actions are pinned to commit SHAs (#4).
@@ -70,6 +70,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The headless login no longer reads hidden page sections as an outcome: markers count only visible elements. Before, the hidden second-factor sections on the gateway login page would have read as "second factor required" right after the first submit and locked the keeper out. The login now also switches the page's "Trading Mode" from Live to Paper before it types anything, and stops before any credential is typed when the switch does not flip. The default submit selector is the one visible login button (`button.xyz-button-login`), and the second-factor marker uses the page's answer fields. All checked against the real login page without a login.
 - The gateway container no longer exits in a loop with "Failed to load configuration file ... Stream closed". The native build ignores `--conf` and always uses IBKR's built-in config, so the entrypoint starts it without `--conf`, gives it a copy of our own key under the built-in keystore password, and the gateway bridge moves to `192.168.250.0/24` so its built-in `192.*` rule admits Docker's proxy. `docker/gateway/conf.yaml` is removed. The port stays on `127.0.0.1` only. ADR 0004.
 - The keeper counts a login attempt itself when the private `login()` never calls `on_submit`, so the 3 failure lockout and the 6 login cap still hold. It warns once per process.
 - `live.runner` and `scripts.train_symbol` accept an empty cookie in the session file, and `live.runner` follows it each cycle, like the portfolio runner.
